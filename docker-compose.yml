@@ -1,0 +1,50 @@
+version: "3.9"
+
+# Local development stack
+# Usage: docker-compose up --build
+#
+# Services:
+#   api     — ASP.NET Core webhook receiver (port 8080)
+#   worker  — Background execution service
+#
+# Note: In production (Azure Container Apps) the queue is shared via Redis.
+# Locally, the in-memory queue won't work across separate containers —
+# run both as a single process or use the combined run below.
+#
+# For local testing, run both projects from Rider/VS in the same process
+# OR use: dotnet run --project TradeFlowGuardian.Api
+# (Worker will be added as a hosted service in a combined host later)
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: TradeFlowGuardian.Api/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Oanda__ApiKey=${OANDA_API_KEY}
+      - Oanda__AccountId=${OANDA_ACCOUNT_ID}
+      - Oanda__Environment=fxpractice
+      - Webhook__Secret=${WEBHOOK_SECRET}
+      - Risk__DefaultRiskPercent=1.0
+      - Filters__EnableAtrSpikeFilter=true
+      - Filters__AtrSpikeMultiplier=2.0
+      - Filters__SignalMaxAgeSeconds=60
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: TradeFlowGuardian.Worker/Dockerfile
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - Oanda__ApiKey=${OANDA_API_KEY}
+      - Oanda__AccountId=${OANDA_ACCOUNT_ID}
+      - Oanda__Environment=fxpractice
+      - Risk__DefaultRiskPercent=1.0
+      - Filters__EnableAtrSpikeFilter=true
+    restart: unless-stopped
+    depends_on:
+      - api
