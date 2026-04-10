@@ -6,17 +6,10 @@
 - [x] ~~Worker appsettings.json incomplete~~ — Fixed 2026-04-10: Added Oanda/Risk/Filters sections to match Api structure
 
 ### Docker
-- [ ] **Dockerfiles may reference .NET 8** — need verification they target .NET 10 SDK/runtime
-  - Impact: Docker builds may fail or use wrong framework
-  - Fix: Check and update base images to `mcr.microsoft.com/dotnet/sdk:10.0` and `mcr.microsoft.com/dotnet/aspnet:10.0`
-  - Priority: Medium
+~~No open items~~
 
 ### Architecture
-- [ ] **In-memory queue doesn't work across containers** — docker-compose runs Api + Worker in separate containers, but InMemorySignalQueue uses Channel<T> which is in-process only
-  - Impact: Signals queued in Api won't reach Worker
-  - Fix: Phase 2 — migrate to Redis Streams
-  - Workaround: Run both in same process for local dev (use `dotnet run` from Api with Worker as hosted service)
-  - Priority: Low (known limitation, deferred to Phase 2)
+~~No open items~~
 
 ### Code Quality
 - ~~No open items~~
@@ -26,6 +19,9 @@
 - [x] ~~OpenApi package compatibility issue~~ — Fixed 2026-04-10: Removed Microsoft.AspNetCore.OpenApi, kept Swashbuckle only
 - [x] ~~System.Text.Json unnecessary package reference~~ — Fixed 2026-04-10: Removed from Infrastructure project
 - [x] ~~Projects on .NET 8~~ — Migrated all to .NET 10 2026-04-10
+- [x] ~~Dockerfiles reference .NET 8~~ — Confirmed .NET 10 base images in use 2026-04-11
+- [x] ~~In-memory queue doesn't work across containers~~ — Resolved 2026-04-11: Migrated to Redis Streams (Phase 2)
+- [x] ~~No position state cache~~ — Resolved 2026-04-11: `RedisPositionCache` (IPositionCache) added; write-through with 5-min TTL; SignalExecutionHandler uses cache-first with OANDA fallback
 - [x] ~~Hardcoded FX rates in PositionSizer~~ — Fixed 2026-04-10: `GetMidPriceAsync` added to `IOandaClient`/`OandaClient`; `PositionSizer` calls live pricing endpoint with conservative fallbacks on failure
 
 ---

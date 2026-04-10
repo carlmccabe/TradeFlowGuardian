@@ -4,6 +4,7 @@ using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
+using TradeFlowGuardian.Infrastructure.Cache;
 using TradeFlowGuardian.Infrastructure.Queue;
 using TradeFlowGuardian.Worker;
 using TradeFlowGuardian.Worker.Handlers;
@@ -25,6 +26,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
         builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
 
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
+builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────

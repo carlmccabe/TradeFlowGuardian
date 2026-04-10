@@ -62,7 +62,7 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 ### Next Up — Phase 2
 - [x] Live FX rate feed in PositionSizer (replace hardcoded fallbacks)
 - [x] Redis Streams queue (replace in-memory Channel)
-- [ ] Redis position state cache (replace in-process HashSet)
+- [x] Redis position state cache (replace in-process HashSet)
 - [ ] News calendar filter (ForexFactory or Finnhub)
 - [ ] Daily drawdown circuit breaker
 - [ ] PostgreSQL trade history (schema + repository)
@@ -131,8 +131,7 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 See [docs/TECH_DEBT.md](./docs/TECH_DEBT.md) for known issues and resolutions.
 
 **High-priority items:**
-- Worker appsettings.json incomplete (missing Oanda/Risk/Filters sections)
-- Dockerfiles need .NET 10 verification
+- No open high-priority items.
 
 When fixing bugs or implementing features, check docs/TECH_DEBT.md first to avoid duplicating known issues.
 

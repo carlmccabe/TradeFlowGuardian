@@ -21,6 +21,7 @@ public class SignalExecutionHandler(
     ISignalFilter filter,
     IOandaClient oanda,
     IPositionSizer sizer,
+    IPositionCache positionCache,
     IOptions<RiskConfig> risk,
     IConnectionMultiplexer redis,
     ILogger<SignalExecutionHandler> logger)
@@ -59,7 +60,7 @@ public class SignalExecutionHandler(
             // Set with 24h TTL if it doesn't exist
             try 
             {
-                var set = await _db.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists);
+                var set = await _db.StringSetAsync(key, (RedisValue)"1", TimeSpan.FromHours(24), When.NotExists);
                 if (!set)
                 {
                     logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
@@ -82,6 +83,7 @@ public class SignalExecutionHandler(
             var closeResult = await oanda.ClosePositionAsync(signal.Instrument, ct);
             if (closeResult.Success)
             {
+                await positionCache.ClearAsync(signal.Instrument, ct);
                 logger.LogInformation("Successfully closed position for {Instrument}: {Message}",
                     signal.Instrument, closeResult.Message);
             }
@@ -103,8 +105,21 @@ public class SignalExecutionHandler(
             return;
         }
 
-        // ── No pyramiding — check for existing position ───────────────────────
-        var existingUnits = await oanda.GetOpenPositionUnitsAsync(signal.Instrument, ct);
+        // ── No pyramiding — check for existing position (cache → OANDA fallback) ──
+        var (cached, cachedUnits) = await positionCache.GetAsync(signal.Instrument, ct);
+        decimal? existingUnits;
+        if (cached)
+        {
+            existingUnits = cachedUnits;
+            logger.LogDebug("Position cache hit for {Instrument}: {Units} units", signal.Instrument, cachedUnits);
+        }
+        else
+        {
+            existingUnits = await oanda.GetOpenPositionUnitsAsync(signal.Instrument, ct);
+            if (existingUnits is not null)
+                await positionCache.SetAsync(signal.Instrument, existingUnits.Value, ct);
+        }
+
         if (existingUnits is not null)
         {
             logger.LogWarning(
@@ -136,6 +151,9 @@ public class SignalExecutionHandler(
         var stopDistance   = signal.Atr * _risk.AtrStopMultiplier;
         var targetDistance = signal.Atr * _risk.AtrTargetMultiplier;
 
+        var isJpy = signal.Instrument.Contains("JPY");
+        var priceFmt = isJpy ? "F3" : "F5";
+
         decimal stopLoss, takeProfit;
         if (signal.Direction == SignalDirection.Long)
         {
@@ -148,9 +166,31 @@ public class SignalExecutionHandler(
             takeProfit = signal.Price - targetDistance;
         }
 
+        // ── SL/TP Sanity Check ────────────────────────────────────────────────
+        if (takeProfit <= 0 || stopLoss <= 0)
+        {
+            logger.LogError("Aborting signal for {Instrument}: Invalid SL/TP calculated (SL={SL}, TP={TP}). Check ATR ({Atr})",
+                signal.Instrument, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt), signal.Atr);
+            return;
+        }
+
+        if (signal.Direction == SignalDirection.Long && takeProfit <= signal.Price)
+        {
+            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not above entry price ({Price}) for LONG",
+                signal.Instrument, takeProfit.ToString(priceFmt), signal.Price.ToString(priceFmt));
+            return;
+        }
+
+        if (signal.Direction == SignalDirection.Short && takeProfit >= signal.Price)
+        {
+            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not below entry price ({Price}) for SHORT",
+                signal.Instrument, takeProfit.ToString(priceFmt), signal.Price.ToString(priceFmt));
+            return;
+        }
+
         logger.LogInformation(
             "Executing {Direction} order for {Instrument} | Units={Units} | AccountBalance={Balance:C} | Entry={Price} | SL={SL} (dist: {StopDist}) | TP={TP} (dist: {TargetDist})",
-            signal.Direction, signal.Instrument, units, balance, signal.Price, stopLoss, stopDistance, takeProfit, targetDistance);
+            signal.Direction, signal.Instrument, units, balance, signal.Price, stopLoss.ToString(priceFmt), stopDistance.ToString(priceFmt), takeProfit.ToString(priceFmt), targetDistance.ToString(priceFmt));
 
         // ── Place order ───────────────────────────────────────────────────────
         TradeResult result;
@@ -162,6 +202,7 @@ public class SignalExecutionHandler(
         if (result.Success)
         {
             TradeMetrics.OrdersPlaced.WithLabels("success").Inc();
+            await positionCache.SetAsync(signal.Instrument, (decimal)(result.Units ?? units), ct);
             logger.LogInformation(
                 "Order filled successfully for {Instrument}: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
                 signal.Instrument, result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);
@@ -169,7 +210,8 @@ public class SignalExecutionHandler(
         else
         {
             TradeMetrics.OrdersPlaced.WithLabels("failed").Inc();
-            logger.LogError("Order failed for {Instrument}: {Message}", signal.Instrument, result.Message);
+            logger.LogError("Order failed for {Instrument}: {Message} | Entry={Price} | SL={SL} | TP={TP}",
+                signal.Instrument, result.Message, signal.Price.ToString(priceFmt), stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
         }
     }
 }
