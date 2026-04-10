@@ -59,8 +59,8 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [x] Migrated to .NET 10 LTS
 
 ### Next Up — Phase 2
-- [ ] Live FX rate feed in PositionSizer (replace hardcoded fallbacks)
-- [ ] Redis Streams queue (replace in-memory Channel)
+- [x] Live FX rate feed in PositionSizer (replace hardcoded fallbacks)
+- [x] Redis Streams queue (replace in-memory Channel)
 - [ ] Redis position state cache (replace in-process HashSet)
 - [ ] News calendar filter (ForexFactory or Finnhub)
 - [ ] Daily drawdown circuit breaker

@@ -3,6 +3,7 @@ using TradeFlowGuardian.Core.Enums;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 using Prometheus;
+using StackExchange.Redis;
 using TradeFlowGuardian.Infrastructure.Observability;
 using Microsoft.Extensions.Options;
 
@@ -21,12 +22,11 @@ public class SignalExecutionHandler(
     IOandaClient oanda,
     IPositionSizer sizer,
     IOptions<RiskConfig> risk,
+    IConnectionMultiplexer redis,
     ILogger<SignalExecutionHandler> logger)
 {
     private readonly RiskConfig _risk = risk.Value;
-
-    // Simple in-memory idempotency set — Phase 2: move to Redis with TTL
-    private static readonly HashSet<string> ProcessedKeys = new();
+    private readonly IDatabase _db = redis.GetDatabase();
 
     public async Task HandleAsync(TradeSignal signal, CancellationToken ct)
     {
@@ -55,15 +55,15 @@ public class SignalExecutionHandler(
         // ── Idempotency check ─────────────────────────────────────────────────
         if (signal.IdempotencyKey is not null)
         {
-            if (!ProcessedKeys.Add(signal.IdempotencyKey))
+            var key = $"idempotency:signal:{signal.IdempotencyKey}";
+            // Set with 24h TTL if it doesn't exist
+            var set = await _db.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists);
+            
+            if (!set)
             {
                 logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
                 return;
             }
-
-            // Prevent unbounded growth — keep last 500 keys
-            if (ProcessedKeys.Count > 500)
-                ProcessedKeys.Clear();
         }
 
         TradeMetrics.SignalsReceived.Inc();
