@@ -2,6 +2,7 @@ using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Cache;
@@ -16,9 +17,15 @@ builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"
 builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"));
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
+builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
+builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, client =>
+{
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("TradeFlowGuardian/1.0");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -30,13 +37,16 @@ builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────
+builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
 builder.Services.AddScoped<SignalAgeFilter>();
 builder.Services.AddScoped<AtrSpikeFilter>();
+builder.Services.AddScoped<NewsCalendarFilter>();
 builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     new CompositeSignalFilter(new List<ISignalFilter>
     {
         sp.GetRequiredService<SignalAgeFilter>(),
-        sp.GetRequiredService<AtrSpikeFilter>()
+        sp.GetRequiredService<AtrSpikeFilter>(),
+        sp.GetRequiredService<NewsCalendarFilter>()
     }));
 
 // ── Worker ────────────────────────────────────────────────────────────────────

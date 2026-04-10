@@ -30,6 +30,13 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Worker"],
       "port": null
+    },
+    {
+      "name": "Dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "TradeFlowGuardian.Dashboard"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

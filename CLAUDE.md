@@ -63,7 +63,7 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [x] Live FX rate feed in PositionSizer (replace hardcoded fallbacks)
 - [x] Redis Streams queue (replace in-memory Channel)
 - [x] Redis position state cache (replace in-process HashSet)
-- [ ] News calendar filter (ForexFactory or Finnhub)
+- [x] News calendar filter (ForexFactory or Finnhub)
 - [ ] Daily drawdown circuit breaker
 - [ ] PostgreSQL trade history (schema + repository)
 
@@ -72,15 +72,16 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [ ] React PWA dashboard (positions, P&L, kill switch, filter status)
 
 - ## Phase 3 — Dashboard (React PWA)
-- [ ] Vite + React 18 + TypeScript scaffold
-- [ ] Tailwind CSS
-- [ ] Account balance widget (live from /api/status/balance)
-- [ ] Open positions panel (per instrument)
+- [x] Vite + React 18 + TypeScript scaffold (`TradeFlowGuardian.Dashboard/`)
+- [x] Tailwind CSS (v4 via @tailwindcss/vite)
+- [x] Account balance widget (polls /api/status/balance every 10s)
+- [x] Open positions panel (per instrument, polls every 5s)
+- [x] Filter status indicators (ATR spike, news, paused)
+- [x] Kill switch button per instrument (POST /api/status/close/{instrument})
+- [x] Global pause toggle (header, POST /api/status/pause)
+- [x] Mobile-first layout (max-w-2xl, single column)
+- [x] PWA manifest + meta tags
 - [ ] P&L chart (daily, weekly)
-- [ ] Filter status indicators (ATR spike, news, age)
-- [ ] Kill switch button per instrument (POST /api/status/close/{instrument})
-- [ ] Global pause toggle
-- [ ] Mobile-first layout (usable from phone at BFX)
 - [ ] SignalR for real-time push (Phase 3 final)
 
 ### Future — Phase 4

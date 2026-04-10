@@ -59,8 +59,43 @@
 - `docs/SECRETS.md` created — threat model, Keychain ACL, 1Password CLI, Azure Key Vault, secret names reference
 - CLAUDE.md updated to reference Keychain ACL + Azure Key Vault strategy
 
+### 2026-04-11 (session 2)
+- Cleared TECH_DEBT.md — Redis Streams confirmed in place, Dockerfiles confirmed on .NET 10 base images
+- Redis position state cache implemented
+  - `IPositionCache` interface added to Core
+  - `RedisPositionCache` in `Infrastructure/Cache/` — keys `tradeflow:position:{instrument}`, 5-min TTL
+  - `SignalExecutionHandler` updated: cache-first position check → OANDA fallback on miss; write-through on order placed; clear on close
+  - `IPositionCache` registered as singleton in Worker `Program.cs`
+  - All 5 unit tests passing
+- Dashboard scaffolded — `TradeFlowGuardian.Dashboard/`
+  - Vite 8 + React 18 + TypeScript + Tailwind CSS v4 via `@tailwindcss/vite`
+  - PWA manifest (`/public/manifest.json`), meta tags, dark theme (`#030712`)
+  - `api/client.ts` — typed fetch wrapper for all `/api/status/*` endpoints
+  - `hooks/usePolling.ts` — generic interval polling hook (pre-SignalR bridge)
+  - `BalanceWidget` — polls `/api/status/balance` every 10s; confirmed live: **$10,665.78 AUD**
+  - `PositionsPanel` — polls `/api/status/positions` every 5s, per-instrument close button
+  - `FilterStatus` — ATR spike / news / paused indicators
+  - `PauseToggle` — global pause/resume in sticky header
+  - Mobile-first layout (`max-w-2xl`, single column)
+  - Vite dev proxy → `http://localhost:5205` (matches API launch profile)
+- Fixed dashboard crash — `balanceAud` field name in API response didn't match TypeScript interface (`balance`); corrected, page now renders with live data
+
+### 2026-04-11 (session 3)
+- ForexFactory iCal economic calendar filter implemented
+  - `EconomicEvent` record + `ImpactLevel` enum added to Core/Models
+  - `IEconomicCalendarService` interface added to Core/Interfaces
+  - `NewsFilterOptions` config class added to Core/Configuration (bound from `"NewsFilter"` section)
+  - `ForexFactoryCalendarService` — fetches `https://www.forexfactory.com/calendar/export?format=ical`, in-memory cache with configurable refresh (default 6h), thread-safe double-checked locking; Ical.Net 5.2.1 used for iCal parsing; fail-open on fetch/parse errors
+  - `NewsCalendarFilter : ISignalFilter` — extracts both currencies from instrument, checks ±window around each event, blocks with reason string like "News blackout: USD Nonfarm Payrolls in 14 min"; fail-open on all exceptions
+  - `NewsFilter` appsettings section added to Worker and Api (Enabled=true, ±30 min window, High impact threshold)
+  - `ForexFactoryCalendarService` registered as singleton; `NewsCalendarFilter` added as 3rd filter in CompositeSignalFilter
+  - `InternalsVisibleTo(TradeFlowGuardian.Tests)` added to Infrastructure csproj for white-box parser tests
+  - 11 tests added (6 NewsCalendarFilter, 5 ForexFactoryParser) — all 16 tests pass
+
 ### Next session goals
+- Add missing API endpoints to StatusController so dashboard is fully live:
+  - `GET /api/status/positions` — all open positions (iterate tracked instruments; call `GetOpenPositionUnitsAsync` per pair)
+  - `GET /api/status/filters` — return AtrSpike / news blocked / paused state
+  - `POST /api/status/pause` — toggle global pause flag
+- Phase 2 remaining: news calendar filter, daily drawdown circuit breaker, PostgreSQL trade history
 - Verify full stack: `./scripts/dev.sh --full` → Prometheus targets UP → Grafana dashboard populating
-- Verify Promtail compose project label matches (`docker compose ls`)
-- Set up Rider Compound run config (API + Worker) for local step-through debugging with Redis in Docker
-- End-to-end test through full Docker stack (signal → Redis stream → Worker → OANDA practice)

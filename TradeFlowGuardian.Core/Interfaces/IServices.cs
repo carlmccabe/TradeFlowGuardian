@@ -28,6 +28,22 @@ public interface IPositionSizer
 }
 
 /// <summary>
+/// Provides scheduled economic events for one or more currency codes.
+/// Implementations are responsible for caching — callers should not throttle calls.
+/// </summary>
+public interface IEconomicCalendarService
+{
+    /// <summary>
+    /// Returns upcoming events for the given currencies within ±<paramref name="lookahead"/> of now.
+    /// Never throws — returns empty list on failure.
+    /// </summary>
+    Task<IReadOnlyList<EconomicEvent>> GetUpcomingEventsAsync(
+        IEnumerable<string> currencies,
+        TimeSpan lookahead,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Redis-backed cache for open position state per instrument.
 /// Avoids an OANDA API round-trip on every signal when position state is already known.
 /// Cache miss falls back to live OANDA query; callers must update the cache after trades.

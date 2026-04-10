@@ -1,3 +1,5 @@
+using TradeFlowGuardian.Core.Models;
+
 namespace TradeFlowGuardian.Core.Configuration;
 
 public class OandaConfig
@@ -48,6 +50,23 @@ public class WebhookConfig
 {
     /// <summary>HMAC-SHA256 secret — must match TradingView alert webhook secret</summary>
     public required string Secret { get; init; }
+}
+
+public class NewsFilterOptions
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Minutes before a high-impact event to block new entries.</summary>
+    public int BlockWindowMinutesBefore { get; set; } = 30;
+
+    /// <summary>Minutes after a high-impact event to block new entries.</summary>
+    public int BlockWindowMinutesAfter { get; set; } = 30;
+
+    /// <summary>Events below this level are ignored.</summary>
+    public ImpactLevel MinimumImpactLevel { get; set; } = ImpactLevel.High;
+
+    /// <summary>How often to refresh the ForexFactory iCal feed (hours).</summary>
+    public int CacheRefreshHours { get; set; } = 6;
 }
 
 public class RedisConfig
