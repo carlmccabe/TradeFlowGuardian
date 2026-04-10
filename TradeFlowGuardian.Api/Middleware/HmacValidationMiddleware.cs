@@ -36,7 +36,8 @@ public class HmacValidationMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         // Only validate the signal endpoint
-        if (!context.Request.Path.StartsWithSegments(WebhookPath))
+        if (!context.Request.Path.StartsWithSegments(WebhookPath) 
+            || context.Request.Method != HttpMethods.Post)
         {
             await _next(context);
             return;

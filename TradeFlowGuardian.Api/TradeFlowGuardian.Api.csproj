@@ -1,9 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TradeFlowGuardian.Api</RootNamespace>
+    <UserSecretsId>0c8ba922-003e-4a7c-bfa4-1ba9c0ad8b24</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
