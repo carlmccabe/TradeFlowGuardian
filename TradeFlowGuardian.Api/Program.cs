@@ -33,7 +33,10 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     }));
 
 // ── API ───────────────────────────────────────────────────────────────────────
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(opts =>
+        opts.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "TradeFlow Guardian API", Version = "v1" }));

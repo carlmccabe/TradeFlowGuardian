@@ -11,17 +11,12 @@ namespace TradeFlowGuardian.Infrastructure.Queue;
 /// </summary>
 public class InMemorySignalQueue : ISignalQueue
 {
-    private readonly Channel<TradeSignal> _channel;
-
-    public InMemorySignalQueue()
+    private readonly Channel<TradeSignal> _channel = Channel.CreateBounded<TradeSignal>(new BoundedChannelOptions(50)
     {
-        _channel = Channel.CreateBounded<TradeSignal>(new BoundedChannelOptions(50)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
-            SingleWriter = false
-        });
-    }
+        FullMode = BoundedChannelFullMode.DropOldest,
+        SingleReader = true,
+        SingleWriter = false
+    });
 
     public async Task EnqueueAsync(TradeSignal signal, CancellationToken ct = default)
         => await _channel.Writer.WriteAsync(signal, ct);

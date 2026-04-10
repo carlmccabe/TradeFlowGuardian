@@ -32,8 +32,8 @@ BODY=$(cat <<EOF
 EOF
 )
 
-# Compact JSON (remove whitespace) to match what the API will receive
-COMPACT=$(echo "$BODY" | tr -d '\n' | sed 's/  */ /g' | sed 's/{ /{/g' | sed 's/ }/}/g' | sed 's/, /,/g' | sed 's/: /:/g')
+# Compact JSON — must be byte-identical between what we sign and what we send
+COMPACT=$(echo "$BODY" | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read()), separators=(',', ':')), end='')")
 
 SIG=$(echo -n "$COMPACT" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
 
@@ -48,13 +48,13 @@ echo "  Payload:"
 echo "$COMPACT" | python3 -m json.tool 2>/dev/null || echo "$COMPACT"
 echo "---------------------------------------"
 
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/api/signal" \
+TMPFILE=$(mktemp)
+HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$API_URL/api/signal" \
   -H "Content-Type: application/json" \
   -H "X-Signature: sha256=$SIG" \
   -d "$COMPACT")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY_RESPONSE=$(echo "$RESPONSE" | head -n -1)
+BODY_RESPONSE=$(cat "$TMPFILE")
+rm -f "$TMPFILE"
 
 echo "  HTTP $HTTP_CODE"
 echo "$BODY_RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$BODY_RESPONSE"
