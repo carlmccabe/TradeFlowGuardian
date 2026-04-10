@@ -59,7 +59,8 @@ public class AtrSpikeFilter : ISignalFilter
                 signal.Instrument, signal.Atr, rollingAvg, spikeThreshold);
 
             return Task.FromResult(FilterResult.Block(
-                $"ATR spike: {signal.Atr:F5} > {spikeThreshold:F5} ({_config.AtrSpikeMultiplier}× avg)"));
+                $"ATR spike: {signal.Atr:F5} > {spikeThreshold:F5} ({_config.AtrSpikeMultiplier}× avg)",
+                "atr_spike"));
         }
 
         return Task.FromResult(FilterResult.Allow());

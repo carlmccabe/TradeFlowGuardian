@@ -2,6 +2,8 @@ using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
+using Prometheus;
+using TradeFlowGuardian.Infrastructure.Observability;
 using Microsoft.Extensions.Options;
 
 namespace TradeFlowGuardian.Worker.Handlers;
@@ -32,6 +34,24 @@ public class SignalExecutionHandler(
             "Signal {Direction} {Instrument} {Key}",
             signal.Direction, signal.Instrument, signal.IdempotencyKey);
 
+        try
+        {
+            await ProcessSignalInternalAsync(signal, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Signal processing cancelled for {Instrument}", signal.Instrument);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unexpected error processing signal for {Instrument}: {Message}", 
+                signal.Instrument, ex.Message);
+            throw; // Re-throw to let the worker handle it/log it as unhandled
+        }
+    }
+
+    private async Task ProcessSignalInternalAsync(TradeSignal signal, CancellationToken ct)
+    {
         // ── Idempotency check ─────────────────────────────────────────────────
         if (signal.IdempotencyKey is not null)
         {
@@ -46,12 +66,22 @@ public class SignalExecutionHandler(
                 ProcessedKeys.Clear();
         }
 
+        TradeMetrics.SignalsReceived.Inc();
+
         // ── Handle Close signal ───────────────────────────────────────────────
         if (signal.Direction == SignalDirection.Close)
         {
             var closeResult = await oanda.ClosePositionAsync(signal.Instrument, ct);
-            logger.LogInformation("Close result: {Success} — {Message}",
-                closeResult.Success, closeResult.Message);
+            if (closeResult.Success)
+            {
+                logger.LogInformation("Successfully closed position for {Instrument}: {Message}",
+                    signal.Instrument, closeResult.Message);
+            }
+            else
+            {
+                logger.LogError("Failed to close position for {Instrument}: {Message}",
+                    signal.Instrument, closeResult.Message);
+            }
             return;
         }
 
@@ -59,7 +89,9 @@ public class SignalExecutionHandler(
         var filterResult = await filter.EvaluateAsync(signal, ct);
         if (!filterResult.Allowed)
         {
-            logger.LogWarning("Signal blocked by filter: {Reason}", filterResult.Reason);
+            logger.LogWarning("Signal for {Instrument} blocked by filter. Reason: {Reason}",
+                signal.Instrument, filterResult.Reason);
+            TradeMetrics.SignalsFiltered.WithLabels(filterResult.Label).Inc();
             return;
         }
 
@@ -68,7 +100,7 @@ public class SignalExecutionHandler(
         if (existingUnits is not null)
         {
             logger.LogWarning(
-                "Position already open on {Instrument} ({Units} units) — signal skipped",
+                "Signal skipped: Position already open on {Instrument} ({Units} units). No pyramiding allowed.",
                 signal.Instrument, existingUnits);
             return;
         }
@@ -77,14 +109,18 @@ public class SignalExecutionHandler(
         var balance = await oanda.GetAccountBalanceAsync(ct);
         if (balance <= 0)
         {
-            logger.LogError("Could not fetch account balance — aborting");
+            logger.LogError("Aborting signal for {Instrument}: Could not fetch account balance or balance is non-positive ({Balance:C})",
+                signal.Instrument, balance);
             return;
         }
+
+        TradeMetrics.AccountBalance.Set((double)balance);
 
         var units = await sizer.CalculateUnitsAsync(signal, balance, ct);
         if (units <= 0)
         {
-            logger.LogError("Position size calculated as 0 — check ATR and risk config");
+            logger.LogError("Aborting signal for {Instrument}: Position size calculated as {Units} units. Check ATR ({Atr}) and risk configuration (Risk%: {RiskPercent}%, Balance: {Balance:C})",
+                signal.Instrument, units, signal.Atr, signal.RiskPercent > 0 ? signal.RiskPercent : _risk.DefaultRiskPercent, balance);
             return;
         }
 
@@ -105,17 +141,27 @@ public class SignalExecutionHandler(
         }
 
         logger.LogInformation(
-            "Executing {Direction} | Units={Units} | Balance={Balance:C} | SL={SL} TP={TP}",
-            signal.Direction, units, balance, stopLoss, takeProfit);
+            "Executing {Direction} order for {Instrument} | Units={Units} | AccountBalance={Balance:C} | Entry={Price} | SL={SL} (dist: {StopDist}) | TP={TP} (dist: {TargetDist})",
+            signal.Direction, signal.Instrument, units, balance, signal.Price, stopLoss, stopDistance, takeProfit, targetDistance);
 
         // ── Place order ───────────────────────────────────────────────────────
-        var result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, ct);
+        TradeResult result;
+        using (TradeMetrics.OrderLatencySeconds.NewTimer())
+        {
+            result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, ct);
+        }
 
         if (result.Success)
+        {
+            TradeMetrics.OrdersPlaced.WithLabels("success").Inc();
             logger.LogInformation(
-                "Order filled: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
-                result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);
+                "Order filled successfully for {Instrument}: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
+                signal.Instrument, result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);
+        }
         else
-            logger.LogError("Order failed: {Message}", result.Message);
+        {
+            TradeMetrics.OrdersPlaced.WithLabels("failed").Inc();
+            logger.LogError("Order failed for {Instrument}: {Message}", signal.Instrument, result.Message);
+        }
     }
 }

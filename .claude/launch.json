@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "Redis",
+      "runtimeExecutable": "redis-server",
+      "runtimeArgs": [],
+      "port": 6379
+    },
+    {
       "name": "API",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Api", "--launch-profile", "http"],
@@ -14,9 +20,15 @@
       "port": null
     },
     {
-      "name": "Docker (full stack)",
+      "name": "Docker (core only)",
       "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "--build"],
+      "runtimeArgs": ["compose", "--profile", "core", "up", "--build"],
+      "port": 8080
+    },
+    {
+      "name": "Docker (full stack + monitoring)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "--profile", "core", "--profile", "monitoring", "up", "--build"],
       "port": 8080
     }
   ]

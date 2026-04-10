@@ -1,4 +1,6 @@
 using Microsoft.OpenApi.Models;
+using Prometheus;
+using StackExchange.Redis;
 using TradeFlowGuardian.Api.Middleware;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
@@ -13,13 +15,18 @@ builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"
 builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"));
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<WebhookConfig>(builder.Configuration.GetSection("Webhook"));
+builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
 
 // ── HTTP Client ───────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
 
+// ── Redis ─────────────────────────────────────────────────────────────────────
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(
+        builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+
 // ── Core Services ─────────────────────────────────────────────────────────────
-// Singleton queue — shared between API (writer) and Worker (reader)
-builder.Services.AddSingleton<ISignalQueue, InMemorySignalQueue>();
+builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters (evaluation order — cheapest first) ───────────────────────────────
@@ -58,9 +65,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("Dashboard");
+app.UseHttpMetrics();   // records http_request_duration_seconds for all routes
 app.UseMiddleware<HmacValidationMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+app.MapMetrics();       // exposes /metrics for Prometheus scraping (no auth — internal network only)
 app.MapGet("/", () => Results.Ok(new
 {
     service = "TradeFlow Guardian API",

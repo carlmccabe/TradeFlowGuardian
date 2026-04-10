@@ -1,3 +1,5 @@
+using Prometheus;
+using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Filters;
@@ -12,10 +14,17 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"));
 builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"));
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
+builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
-builder.Services.AddSingleton<ISignalQueue, InMemorySignalQueue>();
+
+// ── Redis ─────────────────────────────────────────────────────────────────────
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(
+        builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+
+builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────
@@ -31,6 +40,11 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
 // ── Worker ────────────────────────────────────────────────────────────────────
 builder.Services.AddScoped<SignalExecutionHandler>();
 builder.Services.AddHostedService<ExecutionWorker>();
+
+// ── Metrics (Prometheus) ──────────────────────────────────────────────────────
+// Exposes /metrics on port 9091 — scraped by Prometheus in docker-compose
+builder.Services.AddSingleton(_ => new KestrelMetricServer(port: 9091));
+builder.Services.AddHostedService<MetricServerHostedService>();
 
 var host = builder.Build();
 host.Run();

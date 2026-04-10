@@ -1,0 +1,185 @@
+{
+  "uid": "tradeflow-main",
+  "title": "TradeFlow Guardian",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Signals Received (1h)",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        {
+          "expr": "increase(tradeflow_signals_received_total[1h])",
+          "legendFormat": "signals"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "blue", "value": null }
+          ]}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Orders Placed (1h)",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        {
+          "expr": "increase(tradeflow_orders_placed_total{outcome=\"success\"}[1h])",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "increase(tradeflow_orders_placed_total{outcome=\"failed\"}[1h])",
+          "legendFormat": "failed"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "failed" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Account Balance (AUD)",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        { "expr": "tradeflow_account_balance", "legendFormat": "NAV" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyAUD",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "green", "value": 10000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Redis Queue Depth",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        { "expr": "tradeflow_redis_queue_depth", "legendFormat": "pending" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 5 },
+            { "color": "red", "value": 20 }
+          ]}
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Signal Throughput",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        { "expr": "rate(tradeflow_signals_received_total[5m])", "legendFormat": "received/s" },
+        { "expr": "rate(tradeflow_signals_filtered_total[5m])", "legendFormat": "filtered/s ({{reason}})" },
+        { "expr": "rate(tradeflow_orders_placed_total[5m])", "legendFormat": "orders/s ({{outcome}})" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Order Latency (p50 / p95 / p99)",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(tradeflow_order_latency_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(tradeflow_order_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(tradeflow_order_latency_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP Request Rate (API)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-datasource" },
+      "targets": [
+        {
+          "expr": "rate(http_request_duration_seconds_count{job=\"tradeflow_api\"}[5m])",
+          "legendFormat": "{{method}} {{route}} {{status_code}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Application Logs",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki-datasource" },
+      "targets": [
+        {
+          "expr": "{job=\"docker\", service=~\"api|worker\"}",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true
+      }
+    }
+  ]
+}

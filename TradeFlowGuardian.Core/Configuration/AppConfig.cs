@@ -49,3 +49,17 @@ public class WebhookConfig
     /// <summary>HMAC-SHA256 secret — must match TradingView alert webhook secret</summary>
     public required string Secret { get; init; }
 }
+
+public class RedisConfig
+{
+    public string ConnectionString { get; init; } = "localhost:6379";
+
+    /// <summary>Redis Stream key — shared between API (writer) and Worker (reader)</summary>
+    public string StreamName { get; init; } = "tradeflow:signals";
+
+    /// <summary>Consumer group name — all Worker replicas share this group</summary>
+    public string ConsumerGroup { get; init; } = "workers";
+
+    /// <summary>Unique per Worker instance — use hostname in production</summary>
+    public string ConsumerName { get; init; } = "worker-1";
+}

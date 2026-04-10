@@ -20,7 +20,9 @@ public class SignalAgeFilter : ISignalFilter
         var age = DateTimeOffset.UtcNow - signal.Timestamp;
 
         return age.TotalSeconds > _config.SignalMaxAgeSeconds
-            ? Task.FromResult(FilterResult.Block($"Signal too old: {age.TotalSeconds:F0}s > {_config.SignalMaxAgeSeconds}s limit"))
+            ? Task.FromResult(FilterResult.Block(
+                $"Signal too old: {age.TotalSeconds:F0}s > {_config.SignalMaxAgeSeconds}s limit",
+                "signal_too_old"))
             : Task.FromResult(FilterResult.Allow());
     }
 }

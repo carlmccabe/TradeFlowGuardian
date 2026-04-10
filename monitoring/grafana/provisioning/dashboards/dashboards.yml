@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: TradeFlow
+    orgId: 1
+    folder: TradeFlow
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    # Allow editing dashboards in the UI during development
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

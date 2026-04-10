@@ -1,4 +1,8 @@
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
+using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Infrastructure.Observability;
 using TradeFlowGuardian.Worker.Handlers;
 
 namespace TradeFlowGuardian.Worker;
@@ -13,15 +17,21 @@ public class ExecutionWorker : BackgroundService
     private readonly ISignalQueue _queue;
     private readonly IServiceProvider _services;
     private readonly ILogger<ExecutionWorker> _logger;
+    private readonly IDatabase _db;
+    private readonly RedisConfig _redisConfig;
 
     public ExecutionWorker(
         ISignalQueue queue,
         IServiceProvider services,
-        ILogger<ExecutionWorker> logger)
+        ILogger<ExecutionWorker> logger,
+        IConnectionMultiplexer redis,
+        IOptions<RedisConfig> redisConfig)
     {
         _queue = queue;
         _services = services;
         _logger = logger;
+        _db = redis.GetDatabase();
+        _redisConfig = redisConfig.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,6 +44,17 @@ public class ExecutionWorker : BackgroundService
 
             if (signal is null)
                 continue;
+
+            // Update queue depth gauge — uses XPENDING (actual backlog) not XLEN (total history)
+            try
+            {
+                var pending = await _db.StreamPendingAsync(_redisConfig.StreamName, _redisConfig.ConsumerGroup);
+                TradeMetrics.RedisQueueDepth.Set(pending.PendingMessageCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not update queue depth metric");
+            }
 
             // New DI scope per signal so scoped services (filters, sizer) are fresh
             await using var scope = _services.CreateAsyncScope();

@@ -1,25 +1,43 @@
 version: "3.9"
 
-# Local development stack
-# Usage: docker-compose up --build
+# TradeFlow Guardian — local dev stack
 #
-# Services:
-#   api     — ASP.NET Core webhook receiver (port 8080)
-#   worker  — Background execution service
+# Profiles:
+#   core       — redis, api, worker
+#   monitoring — prometheus, loki, promtail, grafana, redis-insight
 #
-# Note: In production (Azure Container Apps) the queue is shared via Redis.
-# Locally, the in-memory queue won't work across separate containers —
-# run both as a single process or use the combined run below.
+# Usage:
+#   docker compose --profile core up --build                          # app only
+#   docker compose --profile core --profile monitoring up --build     # full stack
 #
-# For local testing, run both projects from Rider/VS in the same process
-# OR use: dotnet run --project TradeFlowGuardian.Api
-# (Worker will be added as a hosted service in a combined host later)
+# URLs (full stack):
+#   API:          http://localhost:8080
+#   Swagger:      http://localhost:8080/swagger
+#   Prometheus:   http://localhost:9090
+#   Grafana:      http://localhost:3000  (admin / tradeflow)
+#   RedisInsight: http://localhost:5540
 
 services:
+
+  # ── Core ────────────────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["core", "monitoring"]
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: .
       dockerfile: TradeFlowGuardian.Api/Dockerfile
+    profiles: ["core", "monitoring"]
     ports:
       - "8080:8080"
     environment:
@@ -32,12 +50,19 @@ services:
       - Filters__EnableAtrSpikeFilter=true
       - Filters__AtrSpikeMultiplier=2.0
       - Filters__SignalMaxAgeSeconds=60
+      - Redis__ConnectionString=redis:6379
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
 
   worker:
     build:
       context: .
       dockerfile: TradeFlowGuardian.Worker/Dockerfile
+    profiles: ["core", "monitoring"]
+    ports:
+      - "9091:9091"   # Prometheus metrics scrape port (internal only in prod)
     environment:
       - DOTNET_ENVIRONMENT=Development
       - Oanda__ApiKey=${OANDA_API_KEY}
@@ -45,6 +70,87 @@ services:
       - Oanda__Environment=fxpractice
       - Risk__DefaultRiskPercent=1.0
       - Filters__EnableAtrSpikeFilter=true
+      - Redis__ConnectionString=redis:6379
+      - Redis__ConsumerName=${HOSTNAME:-worker-1}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Monitoring ───────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     restart: unless-stopped
     depends_on:
       - api
+      - worker
+
+  loki:
+    image: grafana/loki:3.1.0
+    profiles: ["monitoring"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    profiles: ["monitoring"]
+    volumes:
+      - ./monitoring/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=tradeflow
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+
+  redis-insight:
+    image: redis/redisinsight:2.52
+    profiles: ["monitoring"]
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/data
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:
+  redisinsight_data:
