@@ -20,28 +20,18 @@ namespace TradeFlowGuardian.Infrastructure.Calendar;
 ///
 /// Fail-open: any fetch or parse error returns an empty list and logs a warning.
 /// </summary>
-public sealed class ForexFactoryCalendarService : IEconomicCalendarService
+public sealed class ForexFactoryCalendarService(
+    IHttpClientFactory httpClientFactory,
+    IOptionsMonitor<NewsFilterOptions> options,
+    ILogger<ForexFactoryCalendarService> logger)
+    : IEconomicCalendarService
 {
     private const string CalendarUrl = "https://www.forexfactory.com/calendar/export?format=ical";
     public const string HttpClientName = "ForexFactory";
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IOptionsMonitor<NewsFilterOptions> _options;
-    private readonly ILogger<ForexFactoryCalendarService> _logger;
-
     private IReadOnlyList<EconomicEvent> _cache = [];
     private DateTimeOffset _cacheExpiry = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _lock = new(1, 1);
-
-    public ForexFactoryCalendarService(
-        IHttpClientFactory httpClientFactory,
-        IOptionsMonitor<NewsFilterOptions> options,
-        ILogger<ForexFactoryCalendarService> logger)
-    {
-        _httpClientFactory = httpClientFactory;
-        _options = options;
-        _logger = logger;
-    }
 
     public async Task<IReadOnlyList<EconomicEvent>> GetUpcomingEventsAsync(
         IEnumerable<string> currencies,
@@ -80,16 +70,16 @@ public sealed class ForexFactoryCalendarService : IEconomicCalendarService
             if (DateTimeOffset.UtcNow < _cacheExpiry)
                 return _cache;
 
-            _logger.LogInformation("Refreshing ForexFactory calendar cache");
+            logger.LogInformation("Refreshing ForexFactory calendar cache");
             var events = await FetchAndParseAsync(ct);
             _cache = events;
-            _cacheExpiry = DateTimeOffset.UtcNow.AddHours(_options.CurrentValue.CacheRefreshHours);
-            _logger.LogInformation("Calendar cache refreshed — {Count} events loaded", events.Count);
+            _cacheExpiry = DateTimeOffset.UtcNow.AddHours(options.CurrentValue.CacheRefreshHours);
+            logger.LogInformation("Calendar cache refreshed — {Count} events loaded", events.Count);
             return _cache;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to refresh ForexFactory calendar — using stale/empty cache");
+            logger.LogWarning(ex, "Failed to refresh ForexFactory calendar — using stale/empty cache");
             return _cache; // stale is better than nothing; empty if first load fails
         }
         finally
@@ -100,7 +90,7 @@ public sealed class ForexFactoryCalendarService : IEconomicCalendarService
 
     private async Task<List<EconomicEvent>> FetchAndParseAsync(CancellationToken ct)
     {
-        using var client = _httpClientFactory.CreateClient(HttpClientName);
+        using var client = httpClientFactory.CreateClient(HttpClientName);
         var icalText = await client.GetStringAsync(CalendarUrl, ct);
         return ParseIcal(icalText);
     }

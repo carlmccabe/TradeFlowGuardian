@@ -4,6 +4,7 @@ using StackExchange.Redis;
 using TradeFlowGuardian.Api.Middleware;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
@@ -16,6 +17,7 @@ builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"))
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<WebhookConfig>(builder.Configuration.GetSection("Webhook"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
+builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
 
 // ── HTTP Client ───────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
@@ -27,6 +29,12 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
+builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
+builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, client =>
+{
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("TradeFlowGuardian/1.0");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters (evaluation order — cheapest first) ───────────────────────────────
