@@ -74,10 +74,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment / secret files — use Keychain instead (scripts/setup-secrets.sh)
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+secrets.env
+docker.env
+.envrc
 
 # Azure
 *.pubxml

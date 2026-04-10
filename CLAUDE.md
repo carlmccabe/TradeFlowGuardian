@@ -31,8 +31,9 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - Scoped services per signal in Worker (new DI scope per HandleAsync call)
 - All OANDA calls go through IOandaClient — never call HttpClient directly from handlers
 - Config via IOptions<T> pattern — never read IConfiguration directly in services
-- Secrets via dotnet user-secrets locally, environment variables in production
-- Never commit secrets — no appsettings.Production.json, no .env files
+- Secrets via macOS Keychain (ACL-protected) for Docker dev — see [docs/SECRETS.md](./docs/SECRETS.md)
+- Production secrets via Azure Key Vault only — live credentials never touch the dev machine
+- Never commit secrets — no appsettings.Production.json, no .env files, no secrets.json
 
 ## Key Design Decisions
 - **No pyramiding** — Worker checks for open position before every entry

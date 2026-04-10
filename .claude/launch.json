@@ -2,34 +2,34 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "Redis",
+      "name": "Dev (core)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev.sh"],
+      "port": 8080
+    },
+    {
+      "name": "Dev (full + monitoring)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev.sh", "--full"],
+      "port": 8080
+    },
+    {
+      "name": "Redis (local fallback)",
       "runtimeExecutable": "redis-server",
       "runtimeArgs": [],
       "port": 6379
     },
     {
-      "name": "API",
+      "name": "API (local fallback)",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Api", "--launch-profile", "http"],
       "port": 5205
     },
     {
-      "name": "Worker",
+      "name": "Worker (local fallback)",
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Worker"],
       "port": null
-    },
-    {
-      "name": "Docker (core only)",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "--profile", "core", "up", "--build"],
-      "port": 8080
-    },
-    {
-      "name": "Docker (full stack + monitoring)",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "--profile", "core", "--profile", "monitoring", "up", "--build"],
-      "port": 8080
     }
   ]
 }
