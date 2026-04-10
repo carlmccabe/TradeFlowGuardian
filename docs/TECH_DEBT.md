@@ -3,10 +3,7 @@
 ## Current Issues
 
 ### Configuration
-- [ ] **Worker appsettings.json incomplete** — only has logging config, missing Oanda/Risk/Filters sections that Api has
-  - Impact: Worker will fail to start without user-secrets or env vars
-  - Fix: Copy config structure from Api appsettings.json
-  - Priority: High
+- [x] ~~Worker appsettings.json incomplete~~ — Fixed 2026-04-10: Added Oanda/Risk/Filters sections to match Api structure
 
 ### Docker
 - [ ] **Dockerfiles may reference .NET 8** — need verification they target .NET 10 SDK/runtime
@@ -22,16 +19,14 @@
   - Priority: Low (known limitation, deferred to Phase 2)
 
 ### Code Quality
-- [ ] **Hardcoded FX rates in PositionSizer** — fallback rates for AUD/USD conversions
-  - Impact: Slight inaccuracy in position sizing for non-AUD account currencies
-  - Fix: Phase 2 — use OANDA pricing API for real-time rates
-  - Priority: Low (rates are conservative fallbacks)
+- ~~No open items~~
 
 ## Resolved
 - [x] ~~TradeResult.Succeeded doesn't support Message property~~ — Fixed 2026-04-10: Use object initializer in ClosePositionAsync
 - [x] ~~OpenApi package compatibility issue~~ — Fixed 2026-04-10: Removed Microsoft.AspNetCore.OpenApi, kept Swashbuckle only
 - [x] ~~System.Text.Json unnecessary package reference~~ — Fixed 2026-04-10: Removed from Infrastructure project
 - [x] ~~Projects on .NET 8~~ — Migrated all to .NET 10 2026-04-10
+- [x] ~~Hardcoded FX rates in PositionSizer~~ — Fixed 2026-04-10: `GetMidPriceAsync` added to `IOandaClient`/`OandaClient`; `PositionSizer` calls live pricing endpoint with conservative fallbacks on failure
 
 ---
 

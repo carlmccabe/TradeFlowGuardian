@@ -181,6 +181,42 @@ public class OandaClient : IOandaClient
     }
 
     /// <summary>
+    /// Returns the mid price (bid+ask)/2 for an instrument. Null on failure.
+    /// Uses the non-streaming pricing snapshot endpoint.
+    /// GET /v3/accounts/{id}/pricing?instruments={instrument}
+    /// </summary>
+    public async Task<decimal?> GetMidPriceAsync(string instrument, CancellationToken ct = default)
+    {
+        var url = $"/v3/accounts/{_config.AccountId}/pricing?instruments={instrument}";
+
+        try
+        {
+            var response = await _http.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var node = JsonNode.Parse(body);
+            var price = node?["prices"]?[0];
+
+            if (price is null)
+                return null;
+
+            var bid = decimal.Parse(price["bids"]?[0]?["price"]?.ToString() ?? "0");
+            var ask = decimal.Parse(price["asks"]?[0]?["price"]?.ToString() ?? "0");
+
+            if (bid <= 0 || ask <= 0)
+                return null;
+
+            return (bid + ask) / 2m;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch mid price for {Instrument}", instrument);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Returns net open units for an instrument. Null if no position.
     /// Positive = long, negative = short.
     /// </summary>

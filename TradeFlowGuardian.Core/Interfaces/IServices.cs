@@ -19,6 +19,7 @@ public interface IOandaClient
     Task<TradeResult> ClosePositionAsync(string instrument, CancellationToken ct = default);
     Task<decimal> GetAccountBalanceAsync(CancellationToken ct = default);
     Task<decimal?> GetOpenPositionUnitsAsync(string instrument, CancellationToken ct = default);
+    Task<decimal?> GetMidPriceAsync(string instrument, CancellationToken ct = default);
 }
 
 public interface IPositionSizer

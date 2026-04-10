@@ -6,17 +6,8 @@ namespace TradeFlowGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class SignalController : ControllerBase
+public class SignalController(ISignalQueue queue, ILogger<SignalController> logger) : ControllerBase
 {
-    private readonly ISignalQueue _queue;
-    private readonly ILogger<SignalController> _logger;
-
-    public SignalController(ISignalQueue queue, ILogger<SignalController> logger)
-    {
-        _queue = queue;
-        _logger = logger;
-    }
-
     /// <summary>
     /// Receives TradingView webhook alert and queues it for execution.
     ///
@@ -38,11 +29,11 @@ public class SignalController : ControllerBase
         [FromBody] TradeSignal signal,
         CancellationToken ct)
     {
-        _logger.LogInformation(
+        logger.LogInformation(
             "Signal received: {Direction} {Instrument} @ {Price} | ATR={Atr} | Key={Key}",
             signal.Direction, signal.Instrument, signal.Price, signal.Atr, signal.IdempotencyKey);
 
-        await _queue.EnqueueAsync(signal, ct);
+        await queue.EnqueueAsync(signal, ct);
 
         return Accepted(new
         {

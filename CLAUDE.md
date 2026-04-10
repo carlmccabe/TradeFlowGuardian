@@ -70,6 +70,18 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [ ] SignalR hub for real-time P&L push
 - [ ] React PWA dashboard (positions, P&L, kill switch, filter status)
 
+- ## Phase 3 — Dashboard (React PWA)
+- [ ] Vite + React 18 + TypeScript scaffold
+- [ ] Tailwind CSS
+- [ ] Account balance widget (live from /api/status/balance)
+- [ ] Open positions panel (per instrument)
+- [ ] P&L chart (daily, weekly)
+- [ ] Filter status indicators (ATR spike, news, age)
+- [ ] Kill switch button per instrument (POST /api/status/close/{instrument})
+- [ ] Global pause toggle
+- [ ] Mobile-first layout (usable from phone at BFX)
+- [ ] SignalR for real-time push (Phase 3 final)
+
 ### Future — Phase 4
 - [ ] GitHub Actions CI/CD
 - [ ] Azure Container Apps deployment

@@ -14,24 +14,15 @@ namespace TradeFlowGuardian.Api.Middleware;
 ///
 /// TV should send:  X-Signature: sha256=<hex(HMAC-SHA256(body, secret))>
 /// </summary>
-public class HmacValidationMiddleware
+public class HmacValidationMiddleware(
+    RequestDelegate next,
+    IOptions<WebhookConfig> config,
+    ILogger<HmacValidationMiddleware> logger)
 {
-    private readonly RequestDelegate _next;
-    private readonly WebhookConfig _config;
-    private readonly ILogger<HmacValidationMiddleware> _logger;
+    private readonly WebhookConfig _config = config.Value;
 
     private const string SignatureHeader = "X-Signature";
     private const string WebhookPath = "/api/signal";
-
-    public HmacValidationMiddleware(
-        RequestDelegate next,
-        IOptions<WebhookConfig> config,
-        ILogger<HmacValidationMiddleware> logger)
-    {
-        _next = next;
-        _config = config.Value;
-        _logger = logger;
-    }
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -39,7 +30,7 @@ public class HmacValidationMiddleware
         if (!context.Request.Path.StartsWithSegments(WebhookPath) 
             || context.Request.Method != HttpMethods.Post)
         {
-            await _next(context);
+            await next(context);
             return;
         }
 
@@ -50,7 +41,7 @@ public class HmacValidationMiddleware
 
         if (!context.Request.Headers.TryGetValue(SignatureHeader, out var signatureHeader))
         {
-            _logger.LogWarning("Webhook request missing {Header}", SignatureHeader);
+            logger.LogWarning("Webhook request missing {Header}", SignatureHeader);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Missing signature header");
             return;
@@ -59,13 +50,13 @@ public class HmacValidationMiddleware
         var signature = signatureHeader.ToString();
         if (!ValidateSignature(body, signature))
         {
-            _logger.LogWarning("Webhook HMAC validation failed — possible tampered payload");
+            logger.LogWarning("Webhook HMAC validation failed — possible tampered payload");
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Invalid signature");
             return;
         }
 
-        await _next(context);
+        await next(context);
     }
 
     private bool ValidateSignature(string body, string signature)

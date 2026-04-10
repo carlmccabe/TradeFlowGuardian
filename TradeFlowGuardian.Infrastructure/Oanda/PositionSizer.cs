@@ -67,14 +67,16 @@ public class PositionSizer : IPositionSizer
     }
 
     /// <summary>
-    /// Fetches mid price for an OANDA instrument.
-    /// Falls back to reasonable defaults if API unavailable.
+    /// Fetches live mid price for an OANDA instrument via the pricing snapshot endpoint.
+    /// Falls back to conservative hardcoded rates if the API call fails.
     /// </summary>
     private async Task<decimal> GetRateAsync(string instrument, bool invert, CancellationToken ct)
     {
-        // Reuse the OANDA pricing endpoint via account summary isn't ideal here —
-        // a dedicated pricing request would be cleaner. For Phase 1 we use a known
-        // fallback map; Phase 2 will wire up the streaming price feed.
+        var live = await _oanda.GetMidPriceAsync(instrument, ct);
+        if (live is > 0)
+            return invert ? (1.0m / live.Value) : live.Value;
+
+        // Conservative fallbacks — used only when pricing endpoint is unreachable
         var fallbacks = new Dictionary<string, decimal>
         {
             ["AUD_USD"] = 0.63m,
@@ -86,8 +88,6 @@ public class PositionSizer : IPositionSizer
             ["EUR_AUD"] = 1.72m
         };
 
-        // TODO Phase 2: replace with live pricing endpoint call
-        // GET /v3/accounts/{id}/pricing?instruments={instrument}
         var rate = fallbacks.GetValueOrDefault(instrument, 1.0m);
         return invert ? (1.0m / rate) : rate;
     }

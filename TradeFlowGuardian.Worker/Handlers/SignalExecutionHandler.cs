@@ -14,46 +14,33 @@ namespace TradeFlowGuardian.Worker.Handlers;
 /// 4. Calculate SL/TP
 /// 5. Submit order to OANDA
 /// </summary>
-public class SignalExecutionHandler
+public class SignalExecutionHandler(
+    ISignalFilter filter,
+    IOandaClient oanda,
+    IPositionSizer sizer,
+    IOptions<RiskConfig> risk,
+    ILogger<SignalExecutionHandler> logger)
 {
-    private readonly ISignalFilter _filter;
-    private readonly IOandaClient _oanda;
-    private readonly IPositionSizer _sizer;
-    private readonly RiskConfig _risk;
-    private readonly ILogger<SignalExecutionHandler> _logger;
+    private readonly RiskConfig _risk = risk.Value;
 
     // Simple in-memory idempotency set — Phase 2: move to Redis with TTL
     private static readonly HashSet<string> ProcessedKeys = new();
 
-    public SignalExecutionHandler(
-        ISignalFilter filter,
-        IOandaClient oanda,
-        IPositionSizer sizer,
-        IOptions<RiskConfig> risk,
-        ILogger<SignalExecutionHandler> logger)
-    {
-        _filter = filter;
-        _oanda = oanda;
-        _sizer = sizer;
-        _risk = risk.Value;
-        _logger = logger;
-    }
-
     public async Task HandleAsync(TradeSignal signal, CancellationToken ct)
     {
-        using var scope = _logger.BeginScope(
+        using var scope = logger.BeginScope(
             "Signal {Direction} {Instrument} {Key}",
             signal.Direction, signal.Instrument, signal.IdempotencyKey);
 
         // ── Idempotency check ─────────────────────────────────────────────────
         if (signal.IdempotencyKey is not null)
         {
-            if (ProcessedKeys.Contains(signal.IdempotencyKey))
+            if (!ProcessedKeys.Add(signal.IdempotencyKey))
             {
-                _logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
+                logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
                 return;
             }
-            ProcessedKeys.Add(signal.IdempotencyKey);
+
             // Prevent unbounded growth — keep last 500 keys
             if (ProcessedKeys.Count > 500)
                 ProcessedKeys.Clear();
@@ -62,42 +49,42 @@ public class SignalExecutionHandler
         // ── Handle Close signal ───────────────────────────────────────────────
         if (signal.Direction == SignalDirection.Close)
         {
-            var closeResult = await _oanda.ClosePositionAsync(signal.Instrument, ct);
-            _logger.LogInformation("Close result: {Success} — {Message}",
+            var closeResult = await oanda.ClosePositionAsync(signal.Instrument, ct);
+            logger.LogInformation("Close result: {Success} — {Message}",
                 closeResult.Success, closeResult.Message);
             return;
         }
 
         // ── Run signal filters ────────────────────────────────────────────────
-        var filterResult = await _filter.EvaluateAsync(signal, ct);
+        var filterResult = await filter.EvaluateAsync(signal, ct);
         if (!filterResult.Allowed)
         {
-            _logger.LogWarning("Signal blocked by filter: {Reason}", filterResult.Reason);
+            logger.LogWarning("Signal blocked by filter: {Reason}", filterResult.Reason);
             return;
         }
 
         // ── No pyramiding — check for existing position ───────────────────────
-        var existingUnits = await _oanda.GetOpenPositionUnitsAsync(signal.Instrument, ct);
+        var existingUnits = await oanda.GetOpenPositionUnitsAsync(signal.Instrument, ct);
         if (existingUnits is not null)
         {
-            _logger.LogWarning(
+            logger.LogWarning(
                 "Position already open on {Instrument} ({Units} units) — signal skipped",
                 signal.Instrument, existingUnits);
             return;
         }
 
         // ── Position sizing ───────────────────────────────────────────────────
-        var balance = await _oanda.GetAccountBalanceAsync(ct);
+        var balance = await oanda.GetAccountBalanceAsync(ct);
         if (balance <= 0)
         {
-            _logger.LogError("Could not fetch account balance — aborting");
+            logger.LogError("Could not fetch account balance — aborting");
             return;
         }
 
-        var units = await _sizer.CalculateUnitsAsync(signal, balance, ct);
+        var units = await sizer.CalculateUnitsAsync(signal, balance, ct);
         if (units <= 0)
         {
-            _logger.LogError("Position size calculated as 0 — check ATR and risk config");
+            logger.LogError("Position size calculated as 0 — check ATR and risk config");
             return;
         }
 
@@ -117,18 +104,18 @@ public class SignalExecutionHandler
             takeProfit = signal.Price - targetDistance;
         }
 
-        _logger.LogInformation(
+        logger.LogInformation(
             "Executing {Direction} | Units={Units} | Balance={Balance:C} | SL={SL} TP={TP}",
             signal.Direction, units, balance, stopLoss, takeProfit);
 
         // ── Place order ───────────────────────────────────────────────────────
-        var result = await _oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, ct);
+        var result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, ct);
 
         if (result.Success)
-            _logger.LogInformation(
+            logger.LogInformation(
                 "Order filled: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
                 result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);
         else
-            _logger.LogError("Order failed: {Message}", result.Message);
+            logger.LogError("Order failed: {Message}", result.Message);
     }
 }
