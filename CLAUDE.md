@@ -115,10 +115,15 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 - Do not skip the idempotency check
 
 ## Tech Debt
-See [TECH_DEBT.md](./TECH_DEBT.md) for known issues and resolutions.
+See [docs/TECH_DEBT.md](./docs/TECH_DEBT.md) for known issues and resolutions.
 
 **High-priority items:**
 - Worker appsettings.json incomplete (missing Oanda/Risk/Filters sections)
 - Dockerfiles need .NET 10 verification
 
-When fixing bugs or implementing features, check TECH_DEBT.md first to avoid duplicating known issues.
+When fixing bugs or implementing features, check docs/TECH_DEBT.md first to avoid duplicating known issues.
+
+## Session Log
+Add to the session log when you finish working on a new feature.
+
+See [docs/SESSION_LOG.md](./docs/SESSION_LOG.md) for the format.

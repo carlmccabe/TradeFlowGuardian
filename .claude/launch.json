@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "API",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Api", "--launch-profile", "http"],
+      "port": 5205
+    },
+    {
+      "name": "Worker",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "TradeFlowGuardian.Worker"],
+      "port": null
+    },
+    {
+      "name": "Docker (full stack)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "--build"],
+      "port": 8080
+    }
+  ]
+}
