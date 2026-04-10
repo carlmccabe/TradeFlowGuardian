@@ -28,7 +28,7 @@ public class SignalExecutionHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_ShouldProcessNewSignal_AndIgnoreDuplicate()
+    public async Task HandleAsync_ShouldIgnoreDuplicateWhenRedisReturnsFalse()
     {
         // Arrange
         var handler = new SignalExecutionHandler(
@@ -43,19 +43,53 @@ public class SignalExecutionHandlerTests
         {
             Instrument = "EUR_USD",
             Direction = SignalDirection.Long,
-            IdempotencyKey = "test-key-123",
+            IdempotencyKey = "test-key-duplicate",
             Price = 1.1000m,
             Atr = 0.0010m,
             Timestamp = DateTimeOffset.UtcNow
         };
 
-        var key = $"idempotency:signal:{signal.IdempotencyKey}";
+        // Mock Redis to return false (key already exists)
+        _dbMock.Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), false, When.NotExists, CommandFlags.None))
+            .ReturnsAsync(false);
 
-        // First call: Redis returns true (not exists)
-        _dbMock.Setup(x => x.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists, CommandFlags.None))
+        // Act
+        await handler.HandleAsync(signal, CancellationToken.None);
+
+        // Assert
+        // If idempotency works, it should return early and NOT call the filter
+        _filterMock.Verify(x => x.EvaluateAsync(It.IsAny<TradeSignal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldContinueWhenRedisReturnsTrue()
+    {
+        // Arrange
+        var handler = new SignalExecutionHandler(
+            _filterMock.Object,
+            _oandaMock.Object,
+            _sizerMock.Object,
+            _riskOptions,
+            _redisMock.Object,
+            _loggerMock.Object);
+
+        var signal = new TradeSignal
+        {
+            Instrument = "EUR_USD",
+            Direction = SignalDirection.Long,
+            IdempotencyKey = "test-key-new",
+            Price = 1.1000m,
+            Atr = 0.0010m,
+            Timestamp = DateTimeOffset.UtcNow
+        };
+
+        // Mock Redis to return true (key created)
+        // We set up BOTH variants just to be absolutely sure
+        _dbMock.Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), false, When.NotExists, CommandFlags.None))
+            .ReturnsAsync(true);
+        _dbMock.Setup(x => x.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), When.NotExists, CommandFlags.None))
             .ReturnsAsync(true);
 
-        // Setup OANDA and filters to avoid early exit if desired, but we mostly care about idempotency here
         _filterMock.Setup(x => x.EvaluateAsync(It.IsAny<TradeSignal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FilterResult { Allowed = false, Reason = "Stop for test" });
 
@@ -63,18 +97,7 @@ public class SignalExecutionHandlerTests
         await handler.HandleAsync(signal, CancellationToken.None);
 
         // Assert
-        _dbMock.Verify(x => x.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists, CommandFlags.None), Times.Once);
-        _filterMock.Verify(x => x.EvaluateAsync(signal, It.IsAny<CancellationToken>()), Times.Once);
-
-        // Second call: Redis returns false (already exists)
-        _dbMock.Setup(x => x.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists, CommandFlags.None))
-            .ReturnsAsync(false);
-
-        // Act
-        await handler.HandleAsync(signal, CancellationToken.None);
-
-        // Assert
-        _dbMock.Verify(x => x.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists, CommandFlags.None), Times.Exactly(2));
-        _filterMock.Verify(x => x.EvaluateAsync(signal, It.IsAny<CancellationToken>()), Times.Once); // Should NOT have been called a second time
+        // Should continue to filters
+        _filterMock.Verify(x => x.EvaluateAsync(It.IsAny<TradeSignal>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

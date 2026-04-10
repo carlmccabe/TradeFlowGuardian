@@ -57,11 +57,19 @@ public class SignalExecutionHandler(
         {
             var key = $"idempotency:signal:{signal.IdempotencyKey}";
             // Set with 24h TTL if it doesn't exist
-            var set = await _db.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists);
-            
-            if (!set)
+            try 
             {
-                logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
+                var set = await _db.StringSetAsync(key, "1", TimeSpan.FromHours(24), When.NotExists);
+                if (!set)
+                {
+                    logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error checking idempotency in Redis for {Key}. Error: {Message}", signal.IdempotencyKey, ex.Message);
+                // Fail-closed
                 return;
             }
         }
