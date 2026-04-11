@@ -92,7 +92,22 @@
   - `InternalsVisibleTo(TradeFlowGuardian.Tests)` added to Infrastructure csproj for white-box parser tests
   - 11 tests added (6 NewsCalendarFilter, 5 ForexFactoryParser) — all 16 tests pass
 
-### 2026-04-11 (session 4)
+### 2026-04-11 (session 4) — Railway deployment
+- Deployed `TradeFlowGuardian.Api` to Railway
+  - `railway.toml` created at repo root — specifies `dockerfilePath = "TradeFlowGuardian.Api/Dockerfile"` and `buildContext = "."` (required because Dockerfile copies sibling projects)
+  - Dockerfile PORT handling fixed — replaced hardcoded `ENV ASPNETCORE_URLS=http://+:8080` with `CMD ["sh", "-c", "exec dotnet ... --urls http://+:${PORT:-8080}"]` so Railway's injected `PORT` is honoured; `exec` keeps dotnet as PID 1
+  - Health check path `/`, restart policy ON_FAILURE
+- Pre-deploy fixes
+  - `PriceController` — added missing `[ApiController]` and `[Route("api/[controller]")]`; route was resolving to `/price/{instrument}` instead of `/api/price/{instrument}`
+  - `Program.cs` — added TODO comment on `/metrics` endpoint re: private network restriction
+  - `TECH_DEBT.md` — added open item for direct `IConfiguration` read of `Redis:ConnectionString` in `Program.cs` (should use `IOptions<RedisConfig>`)
+- Deployed `TradeFlowGuardian.Worker` to Railway
+  - `TradeFlowGuardian.Worker/railway.toml` created — Root Directory set to `TradeFlowGuardian.Worker/`, `buildContext = ".."` to reach repo root
+  - `KestrelMetricServer` port made dynamic — reads `PORT` env var (Railway-injected) with fallback to 9091 for local docker-compose; without this Railway health-checks the injected PORT, finds nothing listening, and restart-loops
+  - Health check path `/metrics`, restart policy ON_FAILURE
+- Diagnosed `GET /api/status/balance` returning `balanceAud: 0` — root cause was mismatched OANDA account/API key; resolved by user. Documented the silent-failure pattern in `GetAccountBalanceAsync` (catches all exceptions, returns 0 — actual error only visible in Railway logs)
+
+### 2026-04-11 (session 5)
 - Daily drawdown circuit breaker implemented (Phase 2)
   - `IDailyDrawdownGuard` interface added to `Core/Interfaces/IServices.cs`
   - `DailyDrawdownGuard` in `Infrastructure/Drawdown/` — Redis-backed, date-keyed (`drawdown:nav:{yyyyMMdd}`, `drawdown:breached:{yyyyMMdd}`), 48h TTL; resets automatically at UTC midnight with no scheduler
@@ -103,7 +118,7 @@
   - Breach warning logs exactly once per day via SetNX on breached key
   - All 28 tests passing; `_drawdownGuardMock` (default: not breached) wired into all handler and controller test constructors
 
-### 2026-04-11 (session 5)
+### 2026-04-11 (session 6)
 - Completed remaining StatusController endpoints and dashboard wiring
 - `GET /api/status/positions` — calls new `GetAllOpenPositionsAsync` on `IOandaClient`; hits OANDA `/v3/accounts/{id}/openPositions`, returns `[{instrument, units, unrealizedPL, averagePrice}]`; `OpenPositionSummary` record added to Core/Models
 - `POST /api/status/pause` — toggles global pause via `IPauseState`; body `{paused: bool}`; logs warning on every toggle
@@ -119,3 +134,5 @@
 - Use Npgsql + Dapper (no EF); repository interface in Core, implementation in Infrastructure
 - Migration SQL in `docs/migrations/`; connection via `IOptions<PostgresConfig>`
 - Worker writes after every order attempt; Api reads for future history endpoint
+- Phase 3 dashboard: P&L chart, SignalR real-time push
+- Phase 4: GitHub Actions CI/CD
