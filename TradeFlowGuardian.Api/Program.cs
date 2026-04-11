@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Prometheus;
 using StackExchange.Redis;
@@ -9,6 +10,25 @@ using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+// Development: default multi-line console with colours.
+// Production (Railway): single-line so each entry is one line in the log stream.
+builder.Logging.ClearProviders();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddConsole();
+    builder.Logging.AddDebug();
+}
+else
+{
+    builder.Logging.AddSimpleConsole(opts =>
+    {
+        opts.SingleLine = true;
+        opts.TimestampFormat = "HH:mm:ss ";
+        opts.IncludeScopes = true;
+    });
+}
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"));
@@ -58,6 +78,20 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// ── Startup config banner ─────────────────────────────────────────────────────
+{
+    var startupLog = app.Services.GetRequiredService<ILogger<Program>>();
+    var oandaCfg   = app.Services.GetRequiredService<IOptions<OandaConfig>>().Value;
+    var redisCfg   = app.Services.GetRequiredService<IOptions<RedisConfig>>().Value;
+    var filterCfg  = app.Services.GetRequiredService<IOptions<FilterConfig>>().Value;
+    startupLog.LogInformation(
+        "API starting | OANDA={OandaEnv} | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter} | Cors={CorsOrigin}",
+        oandaCfg.Environment, oandaCfg.BaseUrl,
+        RedisHost(redisCfg.ConnectionString), redisCfg.StreamName,
+        filterCfg.EnableAtrSpikeFilter, filterCfg.EnableNewsFilter,
+        builder.Configuration["Dashboard:Origin"] ?? "http://localhost:5173");
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -79,3 +113,7 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 app.Run();
+
+// Strips auth credentials from both redis://user:pass@host and host:port formats.
+static string RedisHost(string cs) =>
+    System.Text.RegularExpressions.Regex.Replace(cs, @"redis://[^@]+@", "").Split(',')[0];

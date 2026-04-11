@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
@@ -11,6 +12,23 @@ using TradeFlowGuardian.Worker;
 using TradeFlowGuardian.Worker.Handlers;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+builder.Logging.ClearProviders();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddConsole();
+    builder.Logging.AddDebug();
+}
+else
+{
+    builder.Logging.AddSimpleConsole(opts =>
+    {
+        opts.SingleLine = true;
+        opts.TimestampFormat = "HH:mm:ss ";
+        opts.IncludeScopes = true;
+    });
+}
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"));
@@ -61,4 +79,23 @@ builder.Services.AddSingleton(_ => new KestrelMetricServer(port: metricsPort));
 builder.Services.AddHostedService<MetricServerHostedService>();
 
 var host = builder.Build();
+
+// ── Startup config banner ─────────────────────────────────────────────────────
+{
+    var startupLog = host.Services.GetRequiredService<ILogger<Program>>();
+    var oandaCfg   = host.Services.GetRequiredService<IOptions<OandaConfig>>().Value;
+    var redisCfg   = host.Services.GetRequiredService<IOptions<RedisConfig>>().Value;
+    var filterCfg  = host.Services.GetRequiredService<IOptions<FilterConfig>>().Value;
+    var newsCfg    = host.Services.GetRequiredService<IOptions<NewsFilterOptions>>().Value;
+    startupLog.LogInformation(
+        "Worker starting | OANDA={OandaEnv} | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | Consumer={Consumer} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter}",
+        oandaCfg.Environment, oandaCfg.BaseUrl,
+        RedisHost(redisCfg.ConnectionString), redisCfg.StreamName, redisCfg.ConsumerName,
+        filterCfg.EnableAtrSpikeFilter, newsCfg.Enabled);
+}
+
 host.Run();
+
+// Strips auth credentials from both redis://user:pass@host and host:port formats.
+static string RedisHost(string cs) =>
+    System.Text.RegularExpressions.Regex.Replace(cs, @"redis://[^@]+@", "").Split(',')[0];
