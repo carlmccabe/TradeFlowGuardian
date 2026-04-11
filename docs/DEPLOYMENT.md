@@ -17,6 +17,7 @@ GitHub repo
 
 - Railway account with project created
 - Redis plugin added to the project (Railway dashboard → + New → Database → Redis)
+- PostgreSQL plugin added to the project (Railway dashboard → + New → Database → PostgreSQL)
 - OANDA practice account with API key and account ID
 - TradingView webhook secret (any strong random string, e.g. `openssl rand -hex 32`)
 
@@ -66,6 +67,7 @@ Railway picks up `TradeFlowGuardian.Worker/railway.toml`:
 | `Oanda__Environment` | `fxpractice` | Change to `fxtrade` for live |
 | `Webhook__Secret` | `<your hmac secret>` | Must match TradingView alert header |
 | `Redis__ConnectionString` | From Redis plugin | See below |
+| `Postgres__ConnectionString` | From Postgres plugin | See below |
 | `Dashboard__Origin` | `https://<your-dashboard-url>` | CORS — omit if no dashboard yet |
 
 **Worker service:**
@@ -78,6 +80,7 @@ Railway picks up `TradeFlowGuardian.Worker/railway.toml`:
 | `Oanda__Environment` | `fxpractice` | |
 | `Redis__ConnectionString` | From Redis plugin | Same instance as Api |
 | `Redis__ConsumerName` | `worker-1` | Change if running multiple Worker replicas |
+| `Postgres__ConnectionString` | From Postgres plugin | Same instance as Api |
 
 **Getting the Redis connection string:**
 
@@ -85,6 +88,30 @@ Railway dashboard → Redis plugin → Connect → copy `REDIS_URL`.
 It looks like: `redis://default:password@hostname.railway.internal:6379`
 
 Paste that value as `Redis__ConnectionString` in both services.
+
+**Getting the Postgres connection string:**
+
+Railway dashboard → PostgreSQL plugin → Connect → copy the connection string.
+It looks like: `postgresql://postgres:password@hostname.railway.internal:5432/railway`
+
+Convert to Npgsql format and paste as `Postgres__ConnectionString` in both services:
+```
+Host=hostname.railway.internal;Database=railway;Username=postgres;Password=<password>
+```
+
+**Running the schema migration:**
+
+After the Postgres plugin is up, connect to it and run:
+
+```bash
+# Via Railway CLI
+railway connect PostgreSQL
+
+# Then paste the contents of:
+# docs/migrations/001_trade_history.sql
+```
+
+Or use any Postgres client (TablePlus, psql) pointed at the Railway connection details. Run each file in `docs/migrations/` in numerical order. Only needs to be done once per environment.
 
 ---
 
@@ -179,6 +206,7 @@ required ones will prevent startup if missing.
 | `Webhook__Secret` | ✅ (Api) | — | HMAC-SHA256 secret for TradingView |
 | `Redis__ConnectionString` | ✅ | `localhost:6379` | Railway Redis URL |
 | `Redis__StreamName` | | `tradeflow:signals` | Redis Stream key |
+| `Postgres__ConnectionString` | ✅ | `""` | Railway Postgres URL (Npgsql format). Empty disables history writes (warning logged). |
 | `Redis__ConsumerGroup` | | `workers` | Shared across all Worker replicas |
 | `Redis__ConsumerName` | | `worker-1` | Unique per Worker instance |
 | `Dashboard__Origin` | | `http://localhost:5173` | CORS origin for dashboard |

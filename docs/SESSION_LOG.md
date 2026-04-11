@@ -152,10 +152,8 @@
   - All 28 tests passing
 
 ### Next session goals
-- Phase 2 final item: PostgreSQL trade history (schema + repository)
-- Schema: id, instrument, direction, entry_price, sl, tp, units, fill_price, order_id, success, error_message, executed_at (UTC)
-- Use Npgsql + Dapper (no EF); repository interface in Core, implementation in Infrastructure
-- Migration SQL in `docs/migrations/`; connection via `IOptions<PostgresConfig>`
-- Worker writes after every order attempt; Api reads for future history endpoint
-- Phase 3 dashboard: P&L chart, SignalR real-time push
+- **Phase 2 complete** — all items done
+- Run `docs/migrations/001_trade_history.sql` against Railway Postgres and set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
+- Phase 3 dashboard: P&L chart (daily/weekly) using trade_history table
+- Phase 3 dashboard: SignalR hub for real-time P&L push
 - Phase 4: GitHub Actions CI/CD
