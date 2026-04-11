@@ -8,6 +8,7 @@ using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.Filters;
+using TradeFlowGuardian.Infrastructure.History;
 using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
@@ -40,6 +41,7 @@ builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filte
 builder.Services.Configure<WebhookConfig>(builder.Configuration.GetSection("Webhook"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
 builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
+builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── HTTP Client ───────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
@@ -60,6 +62,7 @@ builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, clien
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
+builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Filters (evaluation order — cheapest first) ───────────────────────────────
 builder.Services.AddScoped<SignalAgeFilter>();

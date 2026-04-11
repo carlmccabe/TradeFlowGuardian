@@ -136,6 +136,21 @@
 - `FilterStatusResponse` TypeScript type updated to match new API shape; `PauseToggle` works unchanged (reads `data.paused` from `getFilterStatus()`)
 - All 28 tests passing; `_pauseStateMock` wired into `StatusControllerTests`
 
+### 2026-04-11 (session 7)
+- PostgreSQL trade history implemented — Phase 2 complete
+  - `PostgresConfig` added to `Core/Configuration/AppConfig.cs` (bound from `"Postgres"` section)
+  - `TradeHistoryRecord` record added to `Core/Models/` — all schema fields as nullable where appropriate
+  - `ITradeHistoryRepository` interface added to `Core/Interfaces/IServices.cs`
+  - `TradeHistoryRepository` in `Infrastructure/History/` — Npgsql + Dapper, new connection per call; log-and-swallow on failure (DB outage must not abort trade workflow)
+  - `Npgsql 9.0.3` and `Dapper 2.1.35` added to `Infrastructure.csproj`
+  - `docs/migrations/001_trade_history.sql` created — `trade_history` table with `BIGSERIAL` PK, `TIMESTAMPTZ` executed_at, two indexes (instrument, executed_at DESC)
+  - `Postgres:ConnectionString` section added to both `appsettings.json` files
+  - `ITradeHistoryRepository` registered as scoped in both Worker and Api `Program.cs`
+  - `SignalExecutionHandler` updated — `InsertAsync` called with `CancellationToken.None` after every `PlaceMarketOrderAsync` (success or failure) and `ClosePositionAsync`; entry_price/sl/tp/units populated from computed values; close records use 0/null for N/A fields
+  - Pre-existing `Worker.cs` missing `using TradeFlowGuardian.Core.Models` fixed
+  - `_tradeHistoryMock` wired into all 4 `SignalExecutionHandlerTests` constructors
+  - All 28 tests passing
+
 ### Next session goals
 - Phase 2 final item: PostgreSQL trade history (schema + repository)
 - Schema: id, instrument, direction, entry_price, sl, tp, units, fill_price, order_id, success, error_message, executed_at (UTC)

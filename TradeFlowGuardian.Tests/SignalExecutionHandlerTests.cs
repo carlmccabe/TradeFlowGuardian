@@ -18,6 +18,7 @@ public class SignalExecutionHandlerTests
     private readonly Mock<IPositionSizer> _sizerMock = new();
     private readonly Mock<IPositionCache> _positionCacheMock = new();
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock = new();
+    private readonly Mock<ITradeHistoryRepository> _tradeHistoryMock = new();
     private readonly Mock<IConnectionMultiplexer> _redisMock = new();
     private readonly Mock<IDatabase> _dbMock = new();
     private readonly Mock<ILogger<SignalExecutionHandler>> _loggerMock = new();
@@ -53,6 +54,11 @@ public class SignalExecutionHandlerTests
         _drawdownGuardMock
             .Setup(x => x.CheckAndMarkIfBreachedAsync(It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+
+        // Default: trade history writes succeed silently
+        _tradeHistoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<TradeHistoryRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
 
     [Fact]
@@ -65,6 +71,7 @@ public class SignalExecutionHandlerTests
             _sizerMock.Object,
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
+            _tradeHistoryMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -105,6 +112,7 @@ public class SignalExecutionHandlerTests
             _sizerMock.Object,
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
+            _tradeHistoryMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -168,6 +176,7 @@ public class SignalExecutionHandlerTests
             _sizerMock.Object,
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
+            _tradeHistoryMock.Object,
             riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -224,6 +233,7 @@ public class SignalExecutionHandlerTests
             _sizerMock.Object,
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
+            _tradeHistoryMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);

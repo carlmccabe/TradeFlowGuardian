@@ -84,6 +84,19 @@ public interface IDailyDrawdownGuard
 }
 
 /// <summary>
+/// Persists every order attempt (entry or close) to PostgreSQL for audit and P&amp;L history.
+/// Implementations must never throw — a write failure must not abort the trade workflow.
+/// </summary>
+public interface ITradeHistoryRepository
+{
+    /// <summary>
+    /// Inserts a trade record. Called after every PlaceMarketOrderAsync / ClosePositionAsync
+    /// regardless of success or failure.
+    /// </summary>
+    Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Redis-backed cache for open position state per instrument.
 /// Avoids an OANDA API round-trip on every signal when position state is already known.
 /// Cache miss falls back to live OANDA query; callers must update the cache after trades.

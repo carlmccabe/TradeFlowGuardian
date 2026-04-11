@@ -8,6 +8,7 @@ using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Cache;
 using TradeFlowGuardian.Infrastructure.Drawdown;
+using TradeFlowGuardian.Infrastructure.History;
 using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Queue;
 using TradeFlowGuardian.Worker;
@@ -38,6 +39,7 @@ builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"))
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
 builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
+builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
@@ -57,6 +59,7 @@ builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
 builder.Services.AddSingleton<IPauseState, RedisPauseState>();
 builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
+builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();

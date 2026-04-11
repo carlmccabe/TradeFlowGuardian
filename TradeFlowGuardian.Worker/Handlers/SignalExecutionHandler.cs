@@ -23,6 +23,7 @@ public class SignalExecutionHandler(
     IPositionSizer sizer,
     IPositionCache positionCache,
     IDailyDrawdownGuard drawdownGuard,
+    ITradeHistoryRepository tradeHistory,
     IOptions<RiskConfig> risk,
     IConnectionMultiplexer redis,
     ILogger<SignalExecutionHandler> logger)
@@ -88,6 +89,19 @@ public class SignalExecutionHandler(
         {
             // CancellationToken.None — must not abort a close request once sent.
             var closeResult = await oanda.ClosePositionAsync(signal.Instrument, CancellationToken.None);
+            await tradeHistory.InsertAsync(new TradeHistoryRecord
+            {
+                Instrument   = signal.Instrument,
+                Direction    = signal.Direction.ToString(),
+                EntryPrice   = 0,
+                Units        = 0,
+                FillPrice    = closeResult.FillPrice,
+                OrderId      = closeResult.OrderId,
+                Success      = closeResult.Success,
+                ErrorMessage = closeResult.Success ? null : closeResult.Message,
+                ExecutedAt   = closeResult.ExecutedAt
+            }, CancellationToken.None);
+
             if (closeResult.Success)
             {
                 await positionCache.ClearAsync(signal.Instrument, CancellationToken.None);
@@ -222,6 +236,21 @@ public class SignalExecutionHandler(
         {
             result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, CancellationToken.None);
         }
+
+        await tradeHistory.InsertAsync(new TradeHistoryRecord
+        {
+            Instrument   = signal.Instrument,
+            Direction    = signal.Direction.ToString(),
+            EntryPrice   = signal.Price,
+            StopLoss     = stopLoss,
+            TakeProfit   = takeProfit,
+            Units        = units,
+            FillPrice    = result.FillPrice,
+            OrderId      = result.OrderId,
+            Success      = result.Success,
+            ErrorMessage = result.Success ? null : result.Message,
+            ExecutedAt   = result.ExecutedAt
+        }, CancellationToken.None);
 
         if (result.Success)
         {

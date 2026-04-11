@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Core.Models;
 using TradeFlowGuardian.Infrastructure.Observability;
 using TradeFlowGuardian.Worker.Handlers;
 
