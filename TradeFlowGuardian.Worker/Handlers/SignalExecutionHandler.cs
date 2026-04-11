@@ -22,6 +22,7 @@ public class SignalExecutionHandler(
     IOandaClient oanda,
     IPositionSizer sizer,
     IPositionCache positionCache,
+    IDailyDrawdownGuard drawdownGuard,
     IOptions<RiskConfig> risk,
     IConnectionMultiplexer redis,
     ILogger<SignalExecutionHandler> logger)
@@ -138,6 +139,18 @@ public class SignalExecutionHandler(
         }
 
         TradeMetrics.AccountBalance.Set((double)balance);
+
+        // ── Daily drawdown circuit breaker ────────────────────────────────────────
+        // EnsureDayOpenNav is a SetNX — only fires once per UTC day.
+        await drawdownGuard.EnsureDayOpenNavAsync(balance, ct);
+        if (await drawdownGuard.CheckAndMarkIfBreachedAsync(balance, ct))
+        {
+            logger.LogWarning(
+                "Aborting signal for {Instrument}: daily drawdown limit breached (confirmed at balance fetch).",
+                signal.Instrument);
+            TradeMetrics.SignalsFiltered.WithLabels("daily_drawdown").Inc();
+            return;
+        }
 
         var units = await sizer.CalculateUnitsAsync(signal, balance, ct);
         if (units <= 0)

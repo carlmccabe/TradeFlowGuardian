@@ -45,6 +45,33 @@ public interface IEconomicCalendarService
 }
 
 /// <summary>
+/// Redis-backed daily drawdown circuit breaker.
+/// Tracks day-open NAV and pauses new entries when drawdown exceeds the configured limit.
+/// State is date-keyed in Redis and resets automatically at UTC midnight.
+/// </summary>
+public interface IDailyDrawdownGuard
+{
+    /// <summary>Returns true if today's drawdown limit has been breached.</summary>
+    Task<bool> IsBreachedAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Records today's day-open NAV using Redis SetNX. Safe to call on every signal —
+    /// only the first call per UTC day has any effect.
+    /// </summary>
+    Task EnsureDayOpenNavAsync(decimal currentBalance, CancellationToken ct = default);
+
+    /// <summary>
+    /// Compares <paramref name="currentBalance"/> to day-open NAV. If drawdown exceeds
+    /// the configured limit, sets the breached flag in Redis and logs a warning.
+    /// </summary>
+    /// <returns>True if the limit is breached (now or was already breached).</returns>
+    Task<bool> CheckAndMarkIfBreachedAsync(decimal currentBalance, CancellationToken ct = default);
+
+    /// <summary>Returns today's day-open NAV from Redis, or null if not yet recorded.</summary>
+    Task<decimal?> GetDayOpenNavAsync(CancellationToken ct = default);
+}
+
+/// <summary>
 /// Redis-backed cache for open position state per instrument.
 /// Avoids an OANDA API round-trip on every signal when position state is already known.
 /// Cache miss falls back to live OANDA query; callers must update the cache after trades.

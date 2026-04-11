@@ -17,6 +17,7 @@ public class SignalExecutionHandlerTests
     private readonly Mock<IOandaClient> _oandaMock = new();
     private readonly Mock<IPositionSizer> _sizerMock = new();
     private readonly Mock<IPositionCache> _positionCacheMock = new();
+    private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock = new();
     private readonly Mock<IConnectionMultiplexer> _redisMock = new();
     private readonly Mock<IDatabase> _dbMock = new();
     private readonly Mock<ILogger<SignalExecutionHandler>> _loggerMock = new();
@@ -32,7 +33,7 @@ public class SignalExecutionHandlerTests
             AtrTargetMultiplier = 4.0m,
             MaxDailyDrawdownPercent = 3.0m
         });
-        
+
         _redisMock.Setup(x => x.GetDatabase())
             .Returns(_dbMock.Object);
         _redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(_dbMock.Object);
@@ -41,6 +42,17 @@ public class SignalExecutionHandlerTests
         _positionCacheMock
             .Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((false, (decimal?)null));
+
+        // Default: drawdown not breached
+        _drawdownGuardMock
+            .Setup(x => x.IsBreachedAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _drawdownGuardMock
+            .Setup(x => x.EnsureDayOpenNavAsync(It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _drawdownGuardMock
+            .Setup(x => x.CheckAndMarkIfBreachedAsync(It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
     }
 
     [Fact]
@@ -52,6 +64,7 @@ public class SignalExecutionHandlerTests
             _oandaMock.Object,
             _sizerMock.Object,
             _positionCacheMock.Object,
+            _drawdownGuardMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -91,6 +104,7 @@ public class SignalExecutionHandlerTests
             _oandaMock.Object,
             _sizerMock.Object,
             _positionCacheMock.Object,
+            _drawdownGuardMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -153,6 +167,7 @@ public class SignalExecutionHandlerTests
             _oandaMock.Object,
             _sizerMock.Object,
             _positionCacheMock.Object,
+            _drawdownGuardMock.Object,
             riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -208,6 +223,7 @@ public class SignalExecutionHandlerTests
             _oandaMock.Object,
             _sizerMock.Object,
             _positionCacheMock.Object,
+            _drawdownGuardMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);

@@ -1,11 +1,17 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class StatusController(IOandaClient oanda, ILogger<StatusController> logger) : ControllerBase
+public class StatusController(
+    IOandaClient oanda,
+    IDailyDrawdownGuard drawdownGuard,
+    IOptions<RiskConfig> risk,
+    ILogger<StatusController> logger) : ControllerBase
 {
     /// <summary>Returns live account balance from OANDA.</summary>
     [HttpGet("balance")]
@@ -29,6 +35,41 @@ public class StatusController(IOandaClient oanda, ILogger<StatusController> logg
                 > 0 => "LONG",
                 < 0 => "SHORT",
                 _ => "FLAT"
+            },
+            fetchedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Returns current filter status including the daily drawdown circuit breaker state.
+    /// Used by the dashboard to show whether trading is paused.
+    /// </summary>
+    [HttpGet("filters")]
+    public async Task<IActionResult> GetFilterStatus(CancellationToken ct)
+    {
+        var isBreached = await drawdownGuard.IsBreachedAsync(ct);
+        var dayOpenNav = await drawdownGuard.GetDayOpenNavAsync(ct);
+
+        decimal? currentBalance = null;
+        decimal? drawdownPercent = null;
+
+        if (dayOpenNav.HasValue)
+        {
+            currentBalance = await oanda.GetAccountBalanceAsync(ct);
+            if (dayOpenNav.Value > 0)
+                drawdownPercent = (dayOpenNav.Value - currentBalance.Value) / dayOpenNav.Value * 100m;
+        }
+
+        return Ok(new
+        {
+            dailyDrawdown = new
+            {
+                isBreached,
+                dayOpenNav,
+                currentBalance,
+                drawdownPercent,
+                maxDrawdownPercent = risk.Value.MaxDailyDrawdownPercent,
+                tradingDay = DateOnly.FromDateTime(DateTime.UtcNow)
             },
             fetchedAt = DateTimeOffset.UtcNow
         });
