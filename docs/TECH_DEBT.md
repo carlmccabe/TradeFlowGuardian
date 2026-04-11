@@ -12,7 +12,10 @@
 ~~No open items~~
 
 ### Code Quality
-- ~~No open items~~
+- [ ] `Program.cs:26` reads `Redis:ConnectionString` via `IConfiguration` directly
+  (`builder.Configuration["Redis:ConnectionString"]`) instead of `IOptions<RedisConfig>` —
+  violates CLAUDE.md convention. Low risk (startup-only, env var override works), but should
+  be moved to a typed options binding before the DI registration.
 
 ## Resolved
 - [x] ~~TradeResult.Succeeded doesn't support Message property~~ — Fixed 2026-04-10: Use object initializer in ClosePositionAsync
