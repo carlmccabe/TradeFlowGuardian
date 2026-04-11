@@ -20,9 +20,6 @@ public interface IOandaClient
     Task<decimal> GetAccountBalanceAsync(CancellationToken ct = default);
     Task<decimal?> GetOpenPositionUnitsAsync(string instrument, CancellationToken ct = default);
     Task<decimal?> GetMidPriceAsync(string instrument, CancellationToken ct = default);
-    Task<PriceSnapshot?> GetPriceSnapshotAsync(string instrument, CancellationToken ct = default);
-    /// <summary>Returns all instruments with an open position. Empty list on failure.</summary>
-    Task<IReadOnlyList<OpenPositionSummary>> GetAllOpenPositionsAsync(CancellationToken ct = default);
 }
 
 public interface IPositionSizer
@@ -47,59 +44,26 @@ public interface IEconomicCalendarService
 }
 
 /// <summary>
-/// Redis-backed global pause flag. When paused, all new Long/Short entries are blocked.
-/// Persists across Worker restarts; only cleared by an explicit resume call.
+/// Shared filter state — persisted in Redis so both the API and Worker see consistent values.
+///
+/// <list type="bullet">
+///   <item><b>Paused</b> — set via POST /api/status/pause; PauseFilter reads it on every signal.</item>
+///   <item><b>AtrSpike</b> — written by AtrSpikeFilter each time it evaluates a signal.</item>
+///   <item><b>NewsBlocked</b> — written by NewsCalendarFilter each time it evaluates a signal.</item>
+/// </list>
+///
+/// The dashboard polls GET /api/status/filters which reads all three flags.
 /// </summary>
-public interface IPauseState
+public interface IFilterStateService
 {
-    Task<bool> IsPausedAsync(CancellationToken ct = default);
+    Task<bool> GetPausedAsync(CancellationToken ct = default);
     Task SetPausedAsync(bool paused, CancellationToken ct = default);
-}
 
-/// <summary>
-/// Redis-backed daily drawdown circuit breaker.
-/// Tracks day-open NAV and pauses new entries when drawdown exceeds the configured limit.
-/// State is date-keyed in Redis and resets automatically at UTC midnight.
-/// </summary>
-public interface IDailyDrawdownGuard
-{
-    /// <summary>Returns true if today's drawdown limit has been breached.</summary>
-    Task<bool> IsBreachedAsync(CancellationToken ct = default);
+    Task<bool> GetAtrSpikeAsync(CancellationToken ct = default);
+    Task SetAtrSpikeAsync(bool active, CancellationToken ct = default);
 
-    /// <summary>
-    /// Records today's day-open NAV using Redis SetNX. Safe to call on every signal —
-    /// only the first call per UTC day has any effect.
-    /// </summary>
-    Task EnsureDayOpenNavAsync(decimal currentBalance, CancellationToken ct = default);
-
-    /// <summary>
-    /// Compares <paramref name="currentBalance"/> to day-open NAV. If drawdown exceeds
-    /// the configured limit, sets the breached flag in Redis and logs a warning.
-    /// </summary>
-    /// <returns>True if the limit is breached (now or was already breached).</returns>
-    Task<bool> CheckAndMarkIfBreachedAsync(decimal currentBalance, CancellationToken ct = default);
-
-    /// <summary>Returns today's day-open NAV from Redis, or null if not yet recorded.</summary>
-    Task<decimal?> GetDayOpenNavAsync(CancellationToken ct = default);
-}
-
-/// <summary>
-/// Persists every order attempt (entry or close) to PostgreSQL for audit and P&amp;L history.
-/// Implementations must never throw — a write failure must not abort the trade workflow.
-/// </summary>
-public interface ITradeHistoryRepository
-{
-    /// <summary>
-    /// Inserts a trade record. Called after every PlaceMarketOrderAsync / ClosePositionAsync
-    /// regardless of success or failure.
-    /// </summary>
-    Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
-
-    /// <summary>
-    /// Checks connectivity and returns the total number of rows in trade_history.
-    /// Never throws — returns (false, 0, errorMessage) on any failure.
-    /// </summary>
-    Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
+    Task<bool> GetNewsBlockedAsync(CancellationToken ct = default);
+    Task SetNewsBlockedAsync(bool active, CancellationToken ct = default);
 }
 
 /// <summary>
