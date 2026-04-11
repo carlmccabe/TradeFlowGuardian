@@ -1,0 +1,18 @@
+# Railway deployment config for TradeFlowGuardian.Worker
+#
+# In Railway dashboard, set this service's Root Directory to:
+#   TradeFlowGuardian.Worker
+#
+# That makes dockerfilePath resolve to TradeFlowGuardian.Worker/Dockerfile
+# and buildContext ".." resolve to the repo root — required because the
+# Dockerfile copies sibling projects Core and Infrastructure.
+
+[build]
+dockerfilePath = "Dockerfile"
+buildContext = ".."
+
+[deploy]
+healthcheckPath = "/metrics"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

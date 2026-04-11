@@ -92,10 +92,22 @@
   - `InternalsVisibleTo(TradeFlowGuardian.Tests)` added to Infrastructure csproj for white-box parser tests
   - 11 tests added (6 NewsCalendarFilter, 5 ForexFactoryParser) — all 16 tests pass
 
+### 2026-04-11 (session 4) — Railway deployment
+- Deployed `TradeFlowGuardian.Api` to Railway
+  - `railway.toml` created at repo root — specifies `dockerfilePath = "TradeFlowGuardian.Api/Dockerfile"` and `buildContext = "."` (required because Dockerfile copies sibling projects)
+  - Dockerfile PORT handling fixed — replaced hardcoded `ENV ASPNETCORE_URLS=http://+:8080` with `CMD ["sh", "-c", "exec dotnet ... --urls http://+:${PORT:-8080}"]` so Railway's injected `PORT` is honoured; `exec` keeps dotnet as PID 1
+  - Health check path `/`, restart policy ON_FAILURE
+- Pre-deploy fixes
+  - `PriceController` — added missing `[ApiController]` and `[Route("api/[controller]")]`; route was resolving to `/price/{instrument}` instead of `/api/price/{instrument}`
+  - `Program.cs` — added TODO comment on `/metrics` endpoint re: private network restriction
+  - `TECH_DEBT.md` — added open item for direct `IConfiguration` read of `Redis:ConnectionString` in `Program.cs` (should use `IOptions<RedisConfig>`)
+- Deployed `TradeFlowGuardian.Worker` to Railway
+  - `TradeFlowGuardian.Worker/railway.toml` created — Root Directory set to `TradeFlowGuardian.Worker/`, `buildContext = ".."` to reach repo root
+  - `KestrelMetricServer` port made dynamic — reads `PORT` env var (Railway-injected) with fallback to 9091 for local docker-compose; without this Railway health-checks the injected PORT, finds nothing listening, and restart-loops
+  - Health check path `/metrics`, restart policy ON_FAILURE
+- Diagnosed `GET /api/status/balance` returning `balanceAud: 0` — root cause was mismatched OANDA account/API key; resolved by user. Documented the silent-failure pattern in `GetAccountBalanceAsync` (catches all exceptions, returns 0 — actual error only visible in Railway logs)
+
 ### Next session goals
-- Add missing API endpoints to StatusController so dashboard is fully live:
-  - `GET /api/status/positions` — all open positions (iterate tracked instruments; call `GetOpenPositionUnitsAsync` per pair)
-  - `GET /api/status/filters` — return AtrSpike / news blocked / paused state
-  - `POST /api/status/pause` — toggle global pause flag
-- Phase 2 remaining: news calendar filter, daily drawdown circuit breaker, PostgreSQL trade history
-- Verify full stack: `./scripts/dev.sh --full` → Prometheus targets UP → Grafana dashboard populating
+- Phase 2 remaining: daily drawdown circuit breaker, PostgreSQL trade history
+- Phase 3 dashboard: P&L chart, SignalR real-time push
+- Phase 4: GitHub Actions CI/CD
