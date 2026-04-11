@@ -69,6 +69,7 @@ app.UseHttpMetrics();   // records http_request_duration_seconds for all routes
 app.UseMiddleware<HmacValidationMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+// TODO: restrict to private network when Railway private networking is configured
 app.MapMetrics();       // exposes /metrics for Prometheus scraping (no auth — internal network only)
 app.MapGet("/", () => Results.Ok(new
 {
