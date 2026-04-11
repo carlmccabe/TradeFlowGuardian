@@ -54,8 +54,10 @@ builder.Services.AddScoped<SignalExecutionHandler>();
 builder.Services.AddHostedService<ExecutionWorker>();
 
 // ── Metrics (Prometheus) ──────────────────────────────────────────────────────
-// Exposes /metrics on port 9091 — scraped by Prometheus in docker-compose
-builder.Services.AddSingleton(_ => new KestrelMetricServer(port: 9091));
+// Local docker-compose: port 9091. Railway: honours injected PORT env var so
+// the health check at /metrics succeeds on whatever port Railway assigns.
+var metricsPort = int.TryParse(builder.Configuration["PORT"], out var p) ? p : 9091;
+builder.Services.AddSingleton(_ => new KestrelMetricServer(port: metricsPort));
 builder.Services.AddHostedService<MetricServerHostedService>();
 
 var host = builder.Build();
