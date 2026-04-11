@@ -3,6 +3,8 @@ using TradeFlowGuardian.Core.Interfaces;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
+[ApiController]
+[Route("api/[controller]")]
 public class PriceController(IOandaClient oanda, ILogger<PriceController> logger) : ControllerBase
 {
     [HttpGet("price/{instrument}")]

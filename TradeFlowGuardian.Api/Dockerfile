@@ -20,5 +20,5 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
-ENTRYPOINT ["dotnet", "TradeFlowGuardian.Api.dll"]
+# Railway injects $PORT at runtime; default to 8080 for local/Docker Compose use.
+CMD ["sh", "-c", "exec dotnet TradeFlowGuardian.Api.dll --urls http://+:${PORT:-8080}"]

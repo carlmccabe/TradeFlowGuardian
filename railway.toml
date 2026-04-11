@@ -1,0 +1,14 @@
+# Railway deployment config for TradeFlowGuardian.Api
+# Docs: https://docs.railway.app/reference/config-as-code
+
+[build]
+# Dockerfile is not at the repo root — it needs the root as build context
+# because it COPY-references sibling projects (Core, Infrastructure).
+dockerfilePath = "TradeFlowGuardian.Api/Dockerfile"
+buildContext = "."
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
