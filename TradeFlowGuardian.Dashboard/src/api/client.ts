@@ -1,4 +1,6 @@
-const BASE = '/api'
+// In dev, VITE_API_URL is unset and Vite's proxy rewrites /api → localhost:5205.
+// In production, set VITE_API_URL=https://your-api.railway.app (no trailing slash).
+const BASE = `${import.meta.env.VITE_API_URL ?? ''}/api`
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
