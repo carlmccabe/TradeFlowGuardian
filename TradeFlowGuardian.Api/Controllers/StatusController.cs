@@ -9,10 +9,37 @@ namespace TradeFlowGuardian.Api.Controllers;
 [Route("api/[controller]")]
 public class StatusController(
     IOandaClient oanda,
+    IPauseState pauseState,
     IDailyDrawdownGuard drawdownGuard,
     IOptions<RiskConfig> risk,
     ILogger<StatusController> logger) : ControllerBase
 {
+    /// <summary>Returns all instruments with an open position.</summary>
+    [HttpGet("positions")]
+    public async Task<IActionResult> GetPositions(CancellationToken ct)
+    {
+        var positions = await oanda.GetAllOpenPositionsAsync(ct);
+        return Ok(positions.Select(p => new
+        {
+            instrument = p.Instrument,
+            units = p.Units,
+            unrealizedPL = p.UnrealizedPL,
+            averagePrice = p.AveragePrice
+        }));
+    }
+
+    /// <summary>
+    /// Sets or clears the global pause flag. When paused, all new Long/Short entries
+    /// are blocked in the Worker until explicitly resumed.
+    /// </summary>
+    [HttpPost("pause")]
+    public async Task<IActionResult> SetPause([FromBody] SetPauseRequest body, CancellationToken ct)
+    {
+        await pauseState.SetPausedAsync(body.Paused, ct);
+        logger.LogWarning("Global pause set to {Paused} via API", body.Paused);
+        return Ok(new { paused = body.Paused, updatedAt = DateTimeOffset.UtcNow });
+    }
+
     /// <summary>Returns live account balance from OANDA.</summary>
     [HttpGet("balance")]
     public async Task<IActionResult> GetBalance(CancellationToken ct)
@@ -47,6 +74,7 @@ public class StatusController(
     [HttpGet("filters")]
     public async Task<IActionResult> GetFilterStatus(CancellationToken ct)
     {
+        var paused    = await pauseState.IsPausedAsync(ct);
         var isBreached = await drawdownGuard.IsBreachedAsync(ct);
         var dayOpenNav = await drawdownGuard.GetDayOpenNavAsync(ct);
 
@@ -62,6 +90,7 @@ public class StatusController(
 
         return Ok(new
         {
+            paused,
             dailyDrawdown = new
             {
                 isBreached,
@@ -87,3 +116,5 @@ public class StatusController(
             : BadRequest(new { error = result.Message, instrument });
     }
 }
+
+public record SetPauseRequest(bool Paused);

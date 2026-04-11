@@ -92,10 +92,30 @@
   - `InternalsVisibleTo(TradeFlowGuardian.Tests)` added to Infrastructure csproj for white-box parser tests
   - 11 tests added (6 NewsCalendarFilter, 5 ForexFactoryParser) — all 16 tests pass
 
+### 2026-04-11 (session 4)
+- Daily drawdown circuit breaker implemented (Phase 2)
+  - `IDailyDrawdownGuard` interface added to `Core/Interfaces/IServices.cs`
+  - `DailyDrawdownGuard` in `Infrastructure/Drawdown/` — Redis-backed, date-keyed (`drawdown:nav:{yyyyMMdd}`, `drawdown:breached:{yyyyMMdd}`), 48h TTL; resets automatically at UTC midnight with no scheduler
+  - `DailyDrawdownFilter : ISignalFilter` — blocks Long/Short entries when breached; Close signals unaffected (handled before filters)
+  - Worker wired: guard registered singleton, filter inserted second in composite (`SignalAge → DailyDrawdown → AtrSpike → News`); `SignalExecutionHandler` calls `EnsureDayOpenNavAsync` (SetNX, once/day) then `CheckAndMarkIfBreachedAsync` after each balance fetch — closes race window between filter check and balance read
+  - `GET /api/status/filters` added to StatusController — returns `dailyDrawdown.{isBreached, dayOpenNav, currentBalance, drawdownPercent, maxDrawdownPercent, tradingDay}`
+  - `IDailyDrawdownGuard` registered in Api DI for status endpoint
+  - Breach warning logs exactly once per day via SetNX on breached key
+  - All 28 tests passing; `_drawdownGuardMock` (default: not breached) wired into all handler and controller test constructors
+
+### 2026-04-11 (session 5)
+- Completed remaining StatusController endpoints and dashboard wiring
+- `GET /api/status/positions` — calls new `GetAllOpenPositionsAsync` on `IOandaClient`; hits OANDA `/v3/accounts/{id}/openPositions`, returns `[{instrument, units, unrealizedPL, averagePrice}]`; `OpenPositionSummary` record added to Core/Models
+- `POST /api/status/pause` — toggles global pause via `IPauseState`; body `{paused: bool}`; logs warning on every toggle
+- Global pause infrastructure: `IPauseState` interface in Core; `RedisPauseState` in `Infrastructure/Pause/` — key `tradeflow:paused`, no TTL, absent=running; `GlobalPauseFilter` blocks Long/Short when set; registered singleton in both Api and Worker; inserted as second filter in composite (`SignalAge → GlobalPause → DailyDrawdown → AtrSpike → News`)
+- `GET /api/status/filters` updated to include `paused` field alongside `dailyDrawdown`
+- Dashboard `FilterStatus.tsx` updated — shows `Paused` and `Drawdown Limit Breached` indicators with live drawdown percentage subtitle; removed stale `atrSpike`/`newsBlocked` placeholders (those are per-signal, not persistent system state)
+- `FilterStatusResponse` TypeScript type updated to match new API shape; `PauseToggle` works unchanged (reads `data.paused` from `getFilterStatus()`)
+- All 28 tests passing; `_pauseStateMock` wired into `StatusControllerTests`
+
 ### Next session goals
-- Add missing API endpoints to StatusController so dashboard is fully live:
-  - `GET /api/status/positions` — all open positions (iterate tracked instruments; call `GetOpenPositionUnitsAsync` per pair)
-  - `GET /api/status/filters` — return AtrSpike / news blocked / paused state
-  - `POST /api/status/pause` — toggle global pause flag
-- Phase 2 remaining: news calendar filter, daily drawdown circuit breaker, PostgreSQL trade history
-- Verify full stack: `./scripts/dev.sh --full` → Prometheus targets UP → Grafana dashboard populating
+- Phase 2 final item: PostgreSQL trade history (schema + repository)
+- Schema: id, instrument, direction, entry_price, sl, tp, units, fill_price, order_id, success, error_message, executed_at (UTC)
+- Use Npgsql + Dapper (no EF); repository interface in Core, implementation in Infrastructure
+- Migration SQL in `docs/migrations/`; connection via `IOptions<PostgresConfig>`
+- Worker writes after every order attempt; Api reads for future history endpoint

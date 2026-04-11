@@ -7,6 +7,7 @@ using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Cache;
 using TradeFlowGuardian.Infrastructure.Drawdown;
+using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Queue;
 using TradeFlowGuardian.Worker;
 using TradeFlowGuardian.Worker.Handlers;
@@ -35,12 +36,14 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
+builder.Services.AddSingleton<IPauseState, RedisPauseState>();
 builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
 builder.Services.AddScoped<SignalAgeFilter>();
+builder.Services.AddScoped<GlobalPauseFilter>();
 builder.Services.AddScoped<DailyDrawdownFilter>();
 builder.Services.AddScoped<AtrSpikeFilter>();
 builder.Services.AddScoped<NewsCalendarFilter>();
@@ -48,6 +51,7 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     new CompositeSignalFilter(new List<ISignalFilter>
     {
         sp.GetRequiredService<SignalAgeFilter>(),
+        sp.GetRequiredService<GlobalPauseFilter>(),
         sp.GetRequiredService<DailyDrawdownFilter>(),
         sp.GetRequiredService<AtrSpikeFilter>(),
         sp.GetRequiredService<NewsCalendarFilter>()

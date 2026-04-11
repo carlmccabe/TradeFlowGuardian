@@ -21,6 +21,8 @@ public interface IOandaClient
     Task<decimal?> GetOpenPositionUnitsAsync(string instrument, CancellationToken ct = default);
     Task<decimal?> GetMidPriceAsync(string instrument, CancellationToken ct = default);
     Task<PriceSnapshot?> GetPriceSnapshotAsync(string instrument, CancellationToken ct = default);
+    /// <summary>Returns all instruments with an open position. Empty list on failure.</summary>
+    Task<IReadOnlyList<OpenPositionSummary>> GetAllOpenPositionsAsync(CancellationToken ct = default);
 }
 
 public interface IPositionSizer
@@ -42,6 +44,16 @@ public interface IEconomicCalendarService
         IEnumerable<string> currencies,
         TimeSpan lookahead,
         CancellationToken ct = default);
+}
+
+/// <summary>
+/// Redis-backed global pause flag. When paused, all new Long/Short entries are blocked.
+/// Persists across Worker restarts; only cleared by an explicit resume call.
+/// </summary>
+public interface IPauseState
+{
+    Task<bool> IsPausedAsync(CancellationToken ct = default);
+    Task SetPausedAsync(bool paused, CancellationToken ct = default);
 }
 
 /// <summary>

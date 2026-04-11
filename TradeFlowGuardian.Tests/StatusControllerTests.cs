@@ -13,6 +13,7 @@ namespace TradeFlowGuardian.Tests;
 public class StatusControllerTests
 {
     private readonly Mock<IOandaClient> _oandaMock;
+    private readonly Mock<IPauseState> _pauseStateMock;
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock;
     private readonly Mock<ILogger<StatusController>> _loggerMock;
     private readonly StatusController _controller;
@@ -20,12 +21,14 @@ public class StatusControllerTests
     public StatusControllerTests()
     {
         _oandaMock = new Mock<IOandaClient>();
+        _pauseStateMock = new Mock<IPauseState>();
         _drawdownGuardMock = new Mock<IDailyDrawdownGuard>();
         _loggerMock = new Mock<ILogger<StatusController>>();
 
         var riskOptions = Options.Create(new RiskConfig { MaxDailyDrawdownPercent = 3.0m });
         _controller = new StatusController(
             _oandaMock.Object,
+            _pauseStateMock.Object,
             _drawdownGuardMock.Object,
             riskOptions,
             _loggerMock.Object);

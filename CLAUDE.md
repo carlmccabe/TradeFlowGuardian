@@ -64,7 +64,7 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [x] Redis Streams queue (replace in-memory Channel)
 - [x] Redis position state cache (replace in-process HashSet)
 - [x] News calendar filter (ForexFactory or Finnhub)
-- [ ] Daily drawdown circuit breaker
+- [x] Daily drawdown circuit breaker
 - [ ] PostgreSQL trade history (schema + repository)
 
 ### Future — Phase 3

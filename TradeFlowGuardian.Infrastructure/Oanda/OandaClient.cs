@@ -259,6 +259,56 @@ public class OandaClient : IOandaClient
     }
 
     /// <summary>
+    /// Returns all instruments with an open position.
+    /// GET /v3/accounts/{id}/openPositions
+    /// </summary>
+    public async Task<IReadOnlyList<OpenPositionSummary>> GetAllOpenPositionsAsync(CancellationToken ct = default)
+    {
+        var url = $"/v3/accounts/{_config.AccountId}/openPositions";
+
+        try
+        {
+            var response = await _http.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var node = JsonNode.Parse(body);
+            var positions = node?["positions"]?.AsArray();
+
+            if (positions is null)
+                return [];
+
+            var result = new List<OpenPositionSummary>();
+            foreach (var p in positions)
+            {
+                if (p is null) continue;
+
+                var instrument = p["instrument"]?.ToString() ?? string.Empty;
+                var longUnits  = decimal.Parse(p["long"]?["units"]?.ToString()  ?? "0");
+                var shortUnits = decimal.Parse(p["short"]?["units"]?.ToString() ?? "0");
+                var net = longUnits + shortUnits;
+
+                if (net == 0) continue;
+
+                var unrealizedPL  = decimal.Parse(p["unrealizedPL"]?.ToString() ?? "0");
+                var avgPriceStr   = net > 0
+                    ? p["long"]?["averagePrice"]?.ToString()
+                    : p["short"]?["averagePrice"]?.ToString();
+                var averagePrice  = decimal.Parse(avgPriceStr ?? "0");
+
+                result.Add(new OpenPositionSummary(instrument, net, unrealizedPL, averagePrice));
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch open positions");
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Returns net open units for an instrument. Null if no position.
     /// Positive = long, negative = short.
     /// </summary>

@@ -24,9 +24,16 @@ export interface PositionResponse {
 }
 
 export interface FilterStatusResponse {
-  atrSpike: boolean
-  newsBlocked: boolean
   paused: boolean
+  dailyDrawdown: {
+    isBreached: boolean
+    dayOpenNav: number | null
+    currentBalance: number | null
+    drawdownPercent: number | null
+    maxDrawdownPercent: number
+    tradingDay: string
+  }
+  fetchedAt: string
 }
 
 export const api = {

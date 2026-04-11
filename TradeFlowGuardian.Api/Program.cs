@@ -7,6 +7,7 @@ using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.Filters;
+using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
 
@@ -30,6 +31,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
+builder.Services.AddSingleton<IPauseState, RedisPauseState>();
 builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
 builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
 builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, client =>
