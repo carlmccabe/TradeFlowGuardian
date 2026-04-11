@@ -1,31 +1,51 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class StatusController : ControllerBase
+public class StatusController(
+    IOandaClient oanda,
+    IPauseState pauseState,
+    IDailyDrawdownGuard drawdownGuard,
+    ITradeHistoryRepository tradeHistory,
+    IOptions<RiskConfig> risk,
+    ILogger<StatusController> logger) : ControllerBase
 {
-    private readonly IOandaClient _oanda;
-    private readonly IFilterStateService _filterState;
-    private readonly ILogger<StatusController> _logger;
-
-    public StatusController(
-        IOandaClient oanda,
-        IFilterStateService filterState,
-        ILogger<StatusController> logger)
+    /// <summary>Returns all instruments with an open position.</summary>
+    [HttpGet("positions")]
+    public async Task<IActionResult> GetPositions(CancellationToken ct)
     {
-        _oanda = oanda;
-        _filterState = filterState;
-        _logger = logger;
+        var positions = await oanda.GetAllOpenPositionsAsync(ct);
+        return Ok(positions.Select(p => new
+        {
+            instrument = p.Instrument,
+            units = p.Units,
+            unrealizedPL = p.UnrealizedPL,
+            averagePrice = p.AveragePrice
+        }));
+    }
+
+    /// <summary>
+    /// Sets or clears the global pause flag. When paused, all new Long/Short entries
+    /// are blocked in the Worker until explicitly resumed.
+    /// </summary>
+    [HttpPost("pause")]
+    public async Task<IActionResult> SetPause([FromBody] SetPauseRequest body, CancellationToken ct)
+    {
+        await pauseState.SetPausedAsync(body.Paused, ct);
+        logger.LogWarning("Global pause set to {Paused} via API", body.Paused);
+        return Ok(new { paused = body.Paused, updatedAt = DateTimeOffset.UtcNow });
     }
 
     /// <summary>Returns live account balance from OANDA.</summary>
     [HttpGet("balance")]
     public async Task<IActionResult> GetBalance(CancellationToken ct)
     {
-        var balance = await _oanda.GetAccountBalanceAsync(ct);
+        var balance = await oanda.GetAccountBalanceAsync(ct);
         return Ok(new { balanceAud = balance, fetchedAt = DateTimeOffset.UtcNow });
     }
 
@@ -33,7 +53,7 @@ public class StatusController : ControllerBase
     [HttpGet("position/{instrument}")]
     public async Task<IActionResult> GetPosition(string instrument, CancellationToken ct)
     {
-        var units = await _oanda.GetOpenPositionUnitsAsync(instrument, ct);
+        var units = await oanda.GetOpenPositionUnitsAsync(instrument, ct);
         return Ok(new
         {
             instrument,
@@ -48,57 +68,72 @@ public class StatusController : ControllerBase
         });
     }
 
-    /// <summary>Emergency close — closes all units for an instrument immediately.</summary>
-    [HttpPost("close/{instrument}")]
-    public async Task<IActionResult> ClosePosition(string instrument, CancellationToken ct)
-    {
-        _logger.LogWarning("Manual close triggered for {Instrument}", instrument);
-        var result = await _oanda.ClosePositionAsync(instrument, ct);
-
-        return result.Success
-            ? Ok(new { message = result.Message, instrument })
-            : BadRequest(new { error = result.Message, instrument });
-    }
-
     /// <summary>
-    /// Returns the current state of all signal filters.
-    /// atrSpike and newsBlocked reflect the outcome of the most recent signal evaluation
-    /// by the respective filter; paused reflects the operator-controlled pause flag.
+    /// Returns current filter status including the daily drawdown circuit breaker state.
+    /// Used by the dashboard to show whether trading is paused.
     /// </summary>
     [HttpGet("filters")]
     public async Task<IActionResult> GetFilterStatus(CancellationToken ct)
     {
-        var paused      = await _filterState.GetPausedAsync(ct);
-        var atrSpike    = await _filterState.GetAtrSpikeAsync(ct);
-        var newsBlocked = await _filterState.GetNewsBlockedAsync(ct);
+        var paused    = await pauseState.IsPausedAsync(ct);
+        var isBreached = await drawdownGuard.IsBreachedAsync(ct);
+        var dayOpenNav = await drawdownGuard.GetDayOpenNavAsync(ct);
+
+        decimal? currentBalance = null;
+        decimal? drawdownPercent = null;
+
+        if (dayOpenNav.HasValue)
+        {
+            currentBalance = await oanda.GetAccountBalanceAsync(ct);
+            if (dayOpenNav.Value > 0)
+                drawdownPercent = (dayOpenNav.Value - currentBalance.Value) / dayOpenNav.Value * 100m;
+        }
 
         return Ok(new
         {
             paused,
-            atrSpike,
-            newsBlocked,
+            dailyDrawdown = new
+            {
+                isBreached,
+                dayOpenNav,
+                currentBalance,
+                drawdownPercent,
+                maxDrawdownPercent = risk.Value.MaxDailyDrawdownPercent,
+                tradingDay = DateOnly.FromDateTime(DateTime.UtcNow)
+            },
             fetchedAt = DateTimeOffset.UtcNow
         });
     }
 
     /// <summary>
-    /// Pauses or resumes signal execution.
-    /// When paused, PauseFilter blocks every incoming signal before any other filter runs.
+    /// Checks the PostgreSQL trade history connection from inside the running service.
+    /// Returns reachable status, total row count, and any error message.
+    /// Safe to call at any time — read-only, never throws.
     /// </summary>
-    [HttpPost("pause")]
-    public async Task<IActionResult> SetPaused([FromBody] SetPausedRequest body, CancellationToken ct)
+    [HttpGet("db")]
+    public async Task<IActionResult> GetDbStatus(CancellationToken ct)
     {
-        await _filterState.SetPausedAsync(body.Paused, ct);
-
-        _logger.LogWarning("Trading {State} by operator", body.Paused ? "PAUSED" : "RESUMED");
-
+        var (reachable, rowCount, error) = await tradeHistory.GetStatusAsync(ct);
         return Ok(new
         {
-            paused = body.Paused,
-            message = body.Paused ? "Trading paused" : "Trading resumed",
-            updatedAt = DateTimeOffset.UtcNow
+            reachable,
+            rowCount,
+            error,
+            checkedAt = DateTimeOffset.UtcNow
         });
+    }
+
+    /// <summary>Emergency close — closes all units for an instrument immediately.</summary>
+    [HttpPost("close/{instrument}")]
+    public async Task<IActionResult> ClosePosition(string instrument, CancellationToken ct)
+    {
+        logger.LogWarning("Manual close triggered for {Instrument}", instrument);
+        var result = await oanda.ClosePositionAsync(instrument, ct);
+
+        return result.Success
+            ? Ok(new { message = result.Message, instrument })
+            : BadRequest(new { error = result.Message, instrument });
     }
 }
 
-public record SetPausedRequest(bool Paused);
+public record SetPauseRequest(bool Paused);

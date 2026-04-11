@@ -10,7 +10,8 @@ function PositionRow({
   onClose: (instrument: string) => void
 }) {
   const [closing, setClosing] = useState(false)
-  const isLong = position.side === 'LONG'
+  const isLong = position.units > 0
+  const plColor = position.unrealizedPL >= 0 ? 'text-emerald-400' : 'text-red-400'
 
   async function handleClose() {
     setClosing(true)
@@ -29,20 +30,26 @@ function PositionRow({
             isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'
           }`}
         >
-          {position.side}
+          {isLong ? 'LONG' : 'SHORT'}
         </span>
         <span className="font-mono font-medium text-gray-100">
           {position.instrument.replace('_', '/')}
         </span>
         <span className="text-sm text-gray-400">{Math.abs(position.units).toLocaleString()} units</span>
       </div>
-      <button
-        onClick={handleClose}
-        disabled={closing}
-        className="text-xs font-semibold px-3 py-1.5 rounded bg-red-800 hover:bg-red-700 text-red-200 disabled:opacity-40 transition-colors"
-      >
-        {closing ? 'Closing…' : 'Close'}
-      </button>
+      <div className="flex items-center gap-4">
+        <span className={`font-mono font-semibold ${plColor}`}>
+          {position.unrealizedPL >= 0 ? '+' : ''}
+          {position.unrealizedPL.toFixed(2)}
+        </span>
+        <button
+          onClick={handleClose}
+          disabled={closing}
+          className="text-xs font-semibold px-3 py-1.5 rounded bg-red-800 hover:bg-red-700 text-red-200 disabled:opacity-40 transition-colors"
+        >
+          {closing ? 'Closing…' : 'Close'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -7,8 +7,10 @@ using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Cache;
+using TradeFlowGuardian.Infrastructure.Drawdown;
+using TradeFlowGuardian.Infrastructure.History;
+using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Queue;
-using TradeFlowGuardian.Infrastructure.Services;
 using TradeFlowGuardian.Worker;
 using TradeFlowGuardian.Worker.Handlers;
 
@@ -37,6 +39,7 @@ builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"))
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
 builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
+builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
@@ -53,20 +56,24 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
-builder.Services.AddSingleton<IFilterStateService, RedisFilterStateService>();
+builder.Services.AddSingleton<IPauseState, RedisPauseState>();
+builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
+builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
-builder.Services.AddScoped<PauseFilter>();
 builder.Services.AddScoped<SignalAgeFilter>();
+builder.Services.AddScoped<GlobalPauseFilter>();
+builder.Services.AddScoped<DailyDrawdownFilter>();
 builder.Services.AddScoped<AtrSpikeFilter>();
 builder.Services.AddScoped<NewsCalendarFilter>();
 builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     new CompositeSignalFilter(new List<ISignalFilter>
     {
-        sp.GetRequiredService<PauseFilter>(),
         sp.GetRequiredService<SignalAgeFilter>(),
+        sp.GetRequiredService<GlobalPauseFilter>(),
+        sp.GetRequiredService<DailyDrawdownFilter>(),
         sp.GetRequiredService<AtrSpikeFilter>(),
         sp.GetRequiredService<NewsCalendarFilter>()
     }));
@@ -74,6 +81,12 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
 // ── Worker ────────────────────────────────────────────────────────────────────
 builder.Services.AddScoped<SignalExecutionHandler>();
 builder.Services.AddHostedService<ExecutionWorker>();
+
+// ── Shutdown ──────────────────────────────────────────────────────────────────
+// Railway sends SIGTERM and waits 30 s before SIGKILL. Give in-flight order
+// calls (which use CancellationToken.None) time to complete before the host
+// forces shutdown. 5 s (the .NET default) is not enough.
+builder.Services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(30));
 
 // ── Metrics (Prometheus) ──────────────────────────────────────────────────────
 // Local docker-compose: port 9091. Railway: honours injected PORT env var so
