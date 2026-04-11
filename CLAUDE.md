@@ -84,9 +84,10 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [ ] P&L chart (daily, weekly)
 - [ ] SignalR for real-time push (Phase 3 final)
 
-### Future — Phase 4
+### Phase 4 — Infrastructure
+- [x] Railway deployment — Api live with public webhook URL
+- [x] Railway deployment — Worker consuming from shared Redis
 - [ ] GitHub Actions CI/CD
-- [ ] Azure Container Apps deployment
 - [ ] Cloudflare DNS + SSL
 
 ## OANDA API Reference
