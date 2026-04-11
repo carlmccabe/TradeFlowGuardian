@@ -11,6 +11,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// ── Known tradeable instruments ───────────────────────────────────────────────
+
+export const INSTRUMENTS = ['USD_JPY', 'EUR_USD', 'GBP_USD'] as const
+export type Instrument = (typeof INSTRUMENTS)[number]
+
 // ── Status endpoints ──────────────────────────────────────────────────────────
 
 export interface BalanceResponse {
@@ -18,13 +23,15 @@ export interface BalanceResponse {
   fetchedAt: string
 }
 
+// Matches GET /api/status/position/{instrument}
 export interface PositionResponse {
   instrument: string
   units: number
-  unrealizedPL: number
-  averagePrice: number
+  side: 'LONG' | 'SHORT' | 'FLAT'
+  fetchedAt: string
 }
 
+// Matches GET /api/status/filters
 export interface FilterStatusResponse {
   paused: boolean
   dailyDrawdown: {
@@ -38,19 +45,55 @@ export interface FilterStatusResponse {
   fetchedAt: string
 }
 
+// ── Price endpoints ───────────────────────────────────────────────────────────
+
+// Matches GET /api/price/price/{instrument}
+export interface PriceResponse {
+  instrument: string
+  mid: number
+  fetchedAt: string
+}
+
+// ── Health endpoint ───────────────────────────────────────────────────────────
+
+// Matches GET /api/signal/health
+export interface HealthResponse {
+  status: string
+  utc: string
+}
+
 export const api = {
   getBalance: () => request<BalanceResponse>('/status/balance'),
 
-  getPositions: () => request<PositionResponse[]>('/status/positions'),
+  // Fetches position for a single instrument
+  getPosition: (instrument: string) =>
+    request<PositionResponse>(`/status/position/${instrument}`),
+
+  // Fetches all known instruments in parallel, returns only open (non-FLAT) positions
+  getPositions: () =>
+    Promise.all(INSTRUMENTS.map((i) => request<PositionResponse>(`/status/position/${i}`))).then(
+      (results) => results.filter((p) => p.side !== 'FLAT'),
+    ),
 
   getFilterStatus: () => request<FilterStatusResponse>('/status/filters'),
-
-  closePosition: (instrument: string) =>
-    request<void>(`/status/close/${instrument}`, { method: 'POST' }),
 
   setPaused: (paused: boolean) =>
     request<void>('/status/pause', {
       method: 'POST',
       body: JSON.stringify({ paused }),
     }),
+
+  // Live mid price for a single instrument
+  getPrice: (instrument: string) =>
+    request<PriceResponse>(`/price/price/${instrument}`),
+
+  // All prices in parallel
+  getPrices: () =>
+    Promise.all(INSTRUMENTS.map((i) => request<PriceResponse>(`/price/price/${i}`))),
+
+  // System health
+  getHealth: () => request<HealthResponse>('/signal/health'),
+
+  closePosition: (instrument: string) =>
+    request<void>(`/status/close/${instrument}`, { method: 'POST' }),
 }
