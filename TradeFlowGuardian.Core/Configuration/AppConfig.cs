@@ -86,8 +86,10 @@ public class RedisConfig
 public class PostgresConfig
 {
     /// <summary>
-    /// Npgsql connection string.
-    /// Format: "Host=...;Database=tradeflow;Username=...;Password=..."
+    /// Postgres connection string.
+    /// Supports either:
+    /// - Npgsql format: "Host=...;Database=tradeflow;Username=...;Password=..."
+    /// - Railway format: "postgresql://user:password@host:port/database"
     /// Leave empty to disable trade history persistence (not recommended for production).
     /// </summary>
     public string ConnectionString { get; init; } = string.Empty;

@@ -17,8 +17,8 @@ public class TradeHistoryRepository(
     IOptions<PostgresConfig> config,
     ILogger<TradeHistoryRepository> logger) : ITradeHistoryRepository
 {
-    private readonly string _connectionString = config.Value.ConnectionString;
-
+    private readonly string _connectionString = NormalizeConnectionString(config.Value.ConnectionString);
+    
     private const string InsertSql = """
         INSERT INTO trade_history
             (instrument, direction, entry_price, sl, tp, units,
@@ -51,5 +51,31 @@ public class TradeHistoryRepository(
                 "Failed to write trade history for {Instrument} {Direction}: {Message}",
                 record.Instrument, record.Direction, ex.Message);
         }
+    }
+
+    private static string NormalizeConnectionString(string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return string.Empty;
+
+        if (!connectionString.Contains("://", StringComparison.Ordinal))
+            return connectionString;
+
+        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+            return connectionString;
+
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.Port > 0 ? uri.Port : 5432,
+            Database = uri.AbsolutePath.Trim('/'),
+            Username = Uri.UnescapeDataString(uri.UserInfo.Split(':')[0]),
+            Password = uri.UserInfo.Contains(':')
+                ? Uri.UnescapeDataString(uri.UserInfo.Split(':', 2)[1])
+                : string.Empty,
+            SslMode = SslMode.Require,
+        };
+
+        return builder.ConnectionString;
     }
 }
