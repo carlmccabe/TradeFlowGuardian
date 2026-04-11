@@ -25,6 +25,7 @@
     <ProjectReference Include="..\TradeFlowGuardian.Worker\TradeFlowGuardian.Worker.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Infrastructure\TradeFlowGuardian.Infrastructure.csproj" />
+    <ProjectReference Include="..\TradeFlowGuardian.Api\TradeFlowGuardian.Api.csproj" />
   </ItemGroup>
 
 </Project>

@@ -106,8 +106,54 @@
   - `KestrelMetricServer` port made dynamic — reads `PORT` env var (Railway-injected) with fallback to 9091 for local docker-compose; without this Railway health-checks the injected PORT, finds nothing listening, and restart-loops
   - Health check path `/metrics`, restart policy ON_FAILURE
 - Diagnosed `GET /api/status/balance` returning `balanceAud: 0` — root cause was mismatched OANDA account/API key; resolved by user. Documented the silent-failure pattern in `GetAccountBalanceAsync` (catches all exceptions, returns 0 — actual error only visible in Railway logs)
+- Improved logging for Railway
+    - Both `Program.cs`: `ClearProviders()` + conditional format — Development keeps coloured multi-line console; Production uses `SingleLine = true` so each entry is one line in Railway's log stream
+    - Both `Program.cs`: startup config banner logs OANDA env/URL, Redis host (credentials stripped), stream, consumer (Worker), active filters — confirms loaded config at a glance on deploy
+    - Both `appsettings.json`: `StackExchange` and `System.Net.Http.HttpClient` set to `Warning`; `Microsoft.Hosting.Lifetime` kept at `Information`
+- Graceful shutdown hardening
+    - Both `Program.cs`: `HostOptions.ShutdownTimeout = 30 s` — matches Railway's SIGTERM-to-SIGKILL window (up from .NET default of 5 s)
+    - `SignalExecutionHandler`: `PlaceMarketOrderAsync`, `ClosePositionAsync`, and post-fill `positionCache.SetAsync`/`ClearAsync` all use `CancellationToken.None` — market operations must not be aborted mid-flight; OCE in `HandleAsync` now only fires during pre-order checks and log says so explicitly
+    - `ExecutionWorker`: `StopAsync` override logs "shutdown requested" / "stopped cleanly" around `base.StopAsync`; idle `DequeueAsync` OCE caught explicitly and logged as "idle at shutdown"
+
+### 2026-04-11 (session 5)
+- Daily drawdown circuit breaker implemented (Phase 2)
+  - `IDailyDrawdownGuard` interface added to `Core/Interfaces/IServices.cs`
+  - `DailyDrawdownGuard` in `Infrastructure/Drawdown/` — Redis-backed, date-keyed (`drawdown:nav:{yyyyMMdd}`, `drawdown:breached:{yyyyMMdd}`), 48h TTL; resets automatically at UTC midnight with no scheduler
+  - `DailyDrawdownFilter : ISignalFilter` — blocks Long/Short entries when breached; Close signals unaffected (handled before filters)
+  - Worker wired: guard registered singleton, filter inserted second in composite (`SignalAge → DailyDrawdown → AtrSpike → News`); `SignalExecutionHandler` calls `EnsureDayOpenNavAsync` (SetNX, once/day) then `CheckAndMarkIfBreachedAsync` after each balance fetch — closes race window between filter check and balance read
+  - `GET /api/status/filters` added to StatusController — returns `dailyDrawdown.{isBreached, dayOpenNav, currentBalance, drawdownPercent, maxDrawdownPercent, tradingDay}`
+  - `IDailyDrawdownGuard` registered in Api DI for status endpoint
+  - Breach warning logs exactly once per day via SetNX on breached key
+  - All 28 tests passing; `_drawdownGuardMock` (default: not breached) wired into all handler and controller test constructors
+
+### 2026-04-11 (session 6)
+- Completed remaining StatusController endpoints and dashboard wiring
+- `GET /api/status/positions` — calls new `GetAllOpenPositionsAsync` on `IOandaClient`; hits OANDA `/v3/accounts/{id}/openPositions`, returns `[{instrument, units, unrealizedPL, averagePrice}]`; `OpenPositionSummary` record added to Core/Models
+- `POST /api/status/pause` — toggles global pause via `IPauseState`; body `{paused: bool}`; logs warning on every toggle
+- Global pause infrastructure: `IPauseState` interface in Core; `RedisPauseState` in `Infrastructure/Pause/` — key `tradeflow:paused`, no TTL, absent=running; `GlobalPauseFilter` blocks Long/Short when set; registered singleton in both Api and Worker; inserted as second filter in composite (`SignalAge → GlobalPause → DailyDrawdown → AtrSpike → News`)
+- `GET /api/status/filters` updated to include `paused` field alongside `dailyDrawdown`
+- Dashboard `FilterStatus.tsx` updated — shows `Paused` and `Drawdown Limit Breached` indicators with live drawdown percentage subtitle; removed stale `atrSpike`/`newsBlocked` placeholders (those are per-signal, not persistent system state)
+- `FilterStatusResponse` TypeScript type updated to match new API shape; `PauseToggle` works unchanged (reads `data.paused` from `getFilterStatus()`)
+- All 28 tests passing; `_pauseStateMock` wired into `StatusControllerTests`
+
+### 2026-04-11 (session 7)
+- PostgreSQL trade history implemented — Phase 2 complete
+  - `PostgresConfig` added to `Core/Configuration/AppConfig.cs` (bound from `"Postgres"` section)
+  - `TradeHistoryRecord` record added to `Core/Models/` — all schema fields as nullable where appropriate
+  - `ITradeHistoryRepository` interface added to `Core/Interfaces/IServices.cs`
+  - `TradeHistoryRepository` in `Infrastructure/History/` — Npgsql + Dapper, new connection per call; log-and-swallow on failure (DB outage must not abort trade workflow)
+  - `Npgsql 9.0.3` and `Dapper 2.1.35` added to `Infrastructure.csproj`
+  - `docs/migrations/001_trade_history.sql` created — `trade_history` table with `BIGSERIAL` PK, `TIMESTAMPTZ` executed_at, two indexes (instrument, executed_at DESC)
+  - `Postgres:ConnectionString` section added to both `appsettings.json` files
+  - `ITradeHistoryRepository` registered as scoped in both Worker and Api `Program.cs`
+  - `SignalExecutionHandler` updated — `InsertAsync` called with `CancellationToken.None` after every `PlaceMarketOrderAsync` (success or failure) and `ClosePositionAsync`; entry_price/sl/tp/units populated from computed values; close records use 0/null for N/A fields
+  - Pre-existing `Worker.cs` missing `using TradeFlowGuardian.Core.Models` fixed
+  - `_tradeHistoryMock` wired into all 4 `SignalExecutionHandlerTests` constructors
+  - All 28 tests passing
 
 ### Next session goals
-- Phase 2 remaining: daily drawdown circuit breaker, PostgreSQL trade history
-- Phase 3 dashboard: P&L chart, SignalR real-time push
+- **Phase 2 complete** — all items done
+- Run `docs/migrations/001_trade_history.sql` against Railway Postgres and set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
+- Phase 3 dashboard: P&L chart (daily/weekly) using trade_history table
+- Phase 3 dashboard: SignalR hub for real-time P&L push
 - Phase 4: GitHub Actions CI/CD

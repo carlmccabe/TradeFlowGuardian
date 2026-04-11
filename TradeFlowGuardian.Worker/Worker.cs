@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Core.Models;
 using TradeFlowGuardian.Infrastructure.Observability;
 using TradeFlowGuardian.Worker.Handlers;
 
@@ -34,13 +35,29 @@ public class ExecutionWorker : BackgroundService
         _redisConfig = redisConfig.Value;
     }
 
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("ExecutionWorker shutdown requested — waiting for in-flight signal to complete");
+        await base.StopAsync(cancellationToken);
+        _logger.LogInformation("ExecutionWorker stopped cleanly");
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("ExecutionWorker started — waiting for signals");
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var signal = await _queue.DequeueAsync(stoppingToken);
+            TradeSignal? signal;
+            try
+            {
+                signal = await _queue.DequeueAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("ExecutionWorker idle at shutdown — no signal in flight");
+                break;
+            }
 
             if (signal is null)
                 continue;
@@ -72,7 +89,5 @@ public class ExecutionWorker : BackgroundService
                 // Continue — don't crash the worker on a bad signal
             }
         }
-
-        _logger.LogInformation("ExecutionWorker stopped");
     }
 }

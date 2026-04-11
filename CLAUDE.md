@@ -9,10 +9,11 @@ Receives TradingView webhook signals → applies filters → executes via OANDA 
 TradingView Alert (webhook POST)
         ↓
 TradeFlowGuardian.Api          ← ASP.NET Core 10, receives + queues signals
-        ↓ (Channel<TradeSignal>)
+        ↓ (Redis Stream — tradeflow:signals)
 TradeFlowGuardian.Worker       ← .NET Worker Service, filters + executes
-        ↓
-OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
+        ↓                                    ↓
+OANDA v20 REST API             PostgreSQL (trade_history table)
+fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 ```
 
 ## Project Structure
@@ -34,20 +35,23 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - Secrets via macOS Keychain (ACL-protected) for Docker dev — see [docs/SECRETS.md](./docs/SECRETS.md)
 - Production secrets via Azure Key Vault only — live credentials never touch the dev machine
 - Never commit secrets — no appsettings.Production.json, no .env files, no secrets.json
+- DB schema changes go in `docs/migrations/` as numbered SQL files (e.g. `001_trade_history.sql`) — run manually against Postgres; no auto-migration runner
 
 ## Key Design Decisions
 - **No pyramiding** — Worker checks for open position before every entry
 - **Idempotency** — TradeSignal.IdempotencyKey prevents duplicate execution
 - **Filters run in Worker, not Api** — Api just validates and queues; Worker decides
-- **In-memory Channel queue** — Phase 1 only; Phase 2 replaces with Redis Streams
+- **Redis Streams queue** — XADD in Api, XREADGROUP + XACK in Worker; consumer group `workers`
 - **HMAC validation** — POST /api/signal only; GET endpoints are unauthenticated
-- **Fallback FX rates** in PositionSizer — Phase 2 replaces with live OANDA pricing endpoint
+- **Live FX rates** — PositionSizer calls OANDA `/pricing` endpoint; conservative hardcoded fallbacks on failure
+- **Trade history write-after-execute** — ITradeHistoryRepository.InsertAsync called with CancellationToken.None after every order attempt; log-and-swallow so a DB outage never masks a fill
+- **Migrations are manual SQL** — run `docs/migrations/*.sql` in order; no EF, no auto-runner
 
 ## Current Phase: 1 — Foundation
 ### Done
 - [x] Solution scaffold, all 4 projects
 - [x] Core models: TradeSignal, TradeResult, FilterResult
-- [x] Core interfaces: IOandaClient, ISignalQueue, ISignalFilter, IPositionSizer
+- [x] Core interfaces: IOandaClient, ISignalQueue, ISignalFilter, IPositionSizer, ITradeHistoryRepository
 - [x] OandaClient — market orders, close position, balance, open position query
 - [x] PositionSizer — mirrors Pine Script Section 5 risk formula
 - [x] InMemorySignalQueue — Channel<TradeSignal> bounded queue
@@ -64,8 +68,8 @@ OANDA v20 REST API             ← fxpractice (dev) / fxtrade (live)
 - [x] Redis Streams queue (replace in-memory Channel)
 - [x] Redis position state cache (replace in-process HashSet)
 - [x] News calendar filter (ForexFactory or Finnhub)
-- [ ] Daily drawdown circuit breaker
-- [ ] PostgreSQL trade history (schema + repository)
+- [x] Daily drawdown circuit breaker
+- [x] PostgreSQL trade history (schema + repository)
 
 ### Future — Phase 3
 - [ ] SignalR hub for real-time P&L push
@@ -128,6 +132,8 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 - Do not modify appsettings.json with real credentials — use user-secrets
 - Do not pyramid — one position per instrument, enforced in SignalExecutionHandler
 - Do not skip the idempotency check
+- Do not use EF or an auto-migration runner — schema changes are plain SQL in `docs/migrations/`
+- Do not let a trade history write failure surface to the caller — TradeHistoryRepository must log-and-swallow
 
 ## Tech Debt
 See [docs/TECH_DEBT.md](./docs/TECH_DEBT.md) for known issues and resolutions.

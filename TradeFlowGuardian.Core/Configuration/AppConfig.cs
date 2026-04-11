@@ -82,3 +82,15 @@ public class RedisConfig
     /// <summary>Unique per Worker instance — use hostname in production</summary>
     public string ConsumerName { get; init; } = "worker-1";
 }
+
+public class PostgresConfig
+{
+    /// <summary>
+    /// Postgres connection string.
+    /// Supports either:
+    /// - Npgsql format: "Host=...;Database=tradeflow;Username=...;Password=..."
+    /// - Railway format: "postgresql://user:password@host:port/database"
+    /// Leave empty to disable trade history persistence (not recommended for production).
+    /// </summary>
+    public string ConnectionString { get; init; } = string.Empty;
+}

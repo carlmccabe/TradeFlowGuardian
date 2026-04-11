@@ -12,8 +12,8 @@ namespace TradeFlowGuardian.Api.Middleware;
 /// 1. Set a secret string in TV alert → Webhook URL → add header X-Signature
 /// 2. Set the same secret in WebhookConfig:Secret (env var or user secrets)
 ///
-/// TV should send:  X-Signature: sha256=<hex(HMAC-SHA256(body, secret))>
 /// </summary>
+
 public class HmacValidationMiddleware(
     RequestDelegate next,
     IOptions<WebhookConfig> config,
