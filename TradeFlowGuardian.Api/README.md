@@ -58,6 +58,16 @@ Returns current system-level filter state:
 ```
 
 ```
+GET  /api/status/db
+```
+Tests the PostgreSQL connection from inside the running service. Returns `reachable`, total `rowCount`, and any `error` string. Always returns 200 — check `reachable` in the body. Safe to call at any time; read-only.
+
+```json
+{ "reachable": true, "rowCount": 47, "error": null, "checkedAt": "..." }
+{ "reachable": false, "rowCount": 0, "error": "Connection refused", "checkedAt": "..." }
+```
+
+```
 GET  /api/status/price/{instrument}
 ```
 Returns live mid-price from OANDA for one instrument.

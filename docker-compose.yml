@@ -21,6 +21,25 @@ services:
 
   # ── Core ────────────────────────────────────────────────────────────────────
 
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["core", "monitoring"]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tradeflow
+      POSTGRES_PASSWORD: tradeflow
+      POSTGRES_DB: tradeflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docs/migrations:/docker-entrypoint-initdb.d:ro   # auto-runs *.sql on first start
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradeflow -d tradeflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     profiles: ["core", "monitoring"]
@@ -51,9 +70,12 @@ services:
       - Filters__AtrSpikeMultiplier=2.0
       - Filters__SignalMaxAgeSeconds=60
       - Redis__ConnectionString=redis:6379
+      - Postgres__ConnectionString=Host=postgres;Database=tradeflow;Username=tradeflow;Password=tradeflow
     restart: unless-stopped
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     develop:
       watch:
@@ -82,9 +104,12 @@ services:
       - Filters__EnableAtrSpikeFilter=true
       - Redis__ConnectionString=redis:6379
       - Redis__ConsumerName=${HOSTNAME:-worker-1}
+      - Postgres__ConnectionString=Host=postgres;Database=tradeflow;Username=tradeflow;Password=tradeflow
     restart: unless-stopped
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     develop:
       watch:
@@ -170,6 +195,7 @@ services:
       - redis
 
 volumes:
+  postgres_data:
   prometheus_data:
   loki_data:
   grafana_data:

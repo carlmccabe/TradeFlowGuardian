@@ -57,6 +57,7 @@ TradingView Alert (webhook POST)
 
 API → `http://localhost:8080`  
 Swagger → `http://localhost:8080/swagger`  
+Postgres → `localhost:5432` (user: `tradeflow`, pass: `tradeflow`, db: `tradeflow`)  
 Dashboard → `http://localhost:5173` (`cd TradeFlowGuardian.Dashboard && npm run dev`)
 
 ### Without Docker

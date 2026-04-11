@@ -15,6 +15,7 @@ public class StatusControllerTests
     private readonly Mock<IOandaClient> _oandaMock;
     private readonly Mock<IPauseState> _pauseStateMock;
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock;
+    private readonly Mock<ITradeHistoryRepository> _tradeHistoryMock;
     private readonly Mock<ILogger<StatusController>> _loggerMock;
     private readonly StatusController _controller;
 
@@ -23,13 +24,20 @@ public class StatusControllerTests
         _oandaMock = new Mock<IOandaClient>();
         _pauseStateMock = new Mock<IPauseState>();
         _drawdownGuardMock = new Mock<IDailyDrawdownGuard>();
+        _tradeHistoryMock = new Mock<ITradeHistoryRepository>();
         _loggerMock = new Mock<ILogger<StatusController>>();
+
+        // Default: DB reachable with 0 rows
+        _tradeHistoryMock
+            .Setup(x => x.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((true, 0L, (string?)null));
 
         var riskOptions = Options.Create(new RiskConfig { MaxDailyDrawdownPercent = 3.0m });
         _controller = new StatusController(
             _oandaMock.Object,
             _pauseStateMock.Object,
             _drawdownGuardMock.Object,
+            _tradeHistoryMock.Object,
             riskOptions,
             _loggerMock.Object);
     }
@@ -99,6 +107,43 @@ public class StatusControllerTests
 
         var messageProperty = value.GetType().GetProperty("message");
         Assert.Equal("Position closed", messageProperty?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task GetDbStatus_ReturnsOk_WithReachableTrue_WhenConnected()
+    {
+        // Arrange
+        _tradeHistoryMock
+            .Setup(x => x.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((true, 42L, (string?)null));
+
+        // Act
+        var result = await _controller.GetDbStatus(CancellationToken.None);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value!;
+        Assert.Equal(true,  value.GetType().GetProperty("reachable")?.GetValue(value));
+        Assert.Equal(42L,   value.GetType().GetProperty("rowCount")?.GetValue(value));
+        Assert.Null(        value.GetType().GetProperty("error")?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task GetDbStatus_ReturnsOk_WithReachableFalse_WhenUnreachable()
+    {
+        // Arrange
+        _tradeHistoryMock
+            .Setup(x => x.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((false, 0L, "Connection refused"));
+
+        // Act
+        var result = await _controller.GetDbStatus(CancellationToken.None);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value!;
+        Assert.Equal(false,                value.GetType().GetProperty("reachable")?.GetValue(value));
+        Assert.Equal("Connection refused", value.GetType().GetProperty("error")?.GetValue(value));
     }
 
     [Fact]

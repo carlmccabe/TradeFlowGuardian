@@ -53,6 +53,24 @@ public class TradeHistoryRepository(
         }
     }
 
+    public async Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            return (false, 0, "Postgres:ConnectionString is not configured");
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(ct);
+            var count = await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM trade_history");
+            return (true, count, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, 0, ex.Message);
+        }
+    }
+
     private static string NormalizeConnectionString(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))

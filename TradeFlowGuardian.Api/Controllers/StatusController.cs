@@ -11,6 +11,7 @@ public class StatusController(
     IOandaClient oanda,
     IPauseState pauseState,
     IDailyDrawdownGuard drawdownGuard,
+    ITradeHistoryRepository tradeHistory,
     IOptions<RiskConfig> risk,
     ILogger<StatusController> logger) : ControllerBase
 {
@@ -101,6 +102,24 @@ public class StatusController(
                 tradingDay = DateOnly.FromDateTime(DateTime.UtcNow)
             },
             fetchedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Checks the PostgreSQL trade history connection from inside the running service.
+    /// Returns reachable status, total row count, and any error message.
+    /// Safe to call at any time — read-only, never throws.
+    /// </summary>
+    [HttpGet("db")]
+    public async Task<IActionResult> GetDbStatus(CancellationToken ct)
+    {
+        var (reachable, rowCount, error) = await tradeHistory.GetStatusAsync(ct);
+        return Ok(new
+        {
+            reachable,
+            rowCount,
+            error,
+            checkedAt = DateTimeOffset.UtcNow
         });
     }
 

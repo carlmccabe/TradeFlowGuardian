@@ -140,7 +140,12 @@ curl https://<your-api-url>/api/signal/health
 
 curl https://<your-api-url>/api/status/balance
 # → {"balanceAud":10665.78,"fetchedAt":"..."}
+
+curl https://<your-api-url>/api/status/db
+# → {"reachable":true,"rowCount":0,"error":null,"checkedAt":"..."}
+# reachable:false means the connection string is wrong or the migration hasn't been run
 ```
+
 
 ---
 

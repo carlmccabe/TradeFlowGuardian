@@ -94,6 +94,12 @@ public interface ITradeHistoryRepository
     /// regardless of success or failure.
     /// </summary>
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks connectivity and returns the total number of rows in trade_history.
+    /// Never throws — returns (false, 0, errorMessage) on any failure.
+    /// </summary>
+    Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
 }
 
 /// <summary>
