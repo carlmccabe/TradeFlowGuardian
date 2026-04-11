@@ -42,7 +42,12 @@ public class SignalExecutionHandler(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            logger.LogWarning("Signal processing cancelled for {Instrument}", signal.Instrument);
+            // Cancellation reached here means shutdown fired during pre-order checks
+            // (filters, balance fetch, position sizing). Order placement and close
+            // use CancellationToken.None so they are never interrupted once started.
+            logger.LogWarning(
+                "Signal processing interrupted by shutdown for {Instrument} — was in pre-order checks, no order was submitted",
+                signal.Instrument);
         }
         catch (Exception ex)
         {
@@ -81,10 +86,11 @@ public class SignalExecutionHandler(
         // ── Handle Close signal ───────────────────────────────────────────────
         if (signal.Direction == SignalDirection.Close)
         {
-            var closeResult = await oanda.ClosePositionAsync(signal.Instrument, ct);
+            // CancellationToken.None — must not abort a close request once sent.
+            var closeResult = await oanda.ClosePositionAsync(signal.Instrument, CancellationToken.None);
             if (closeResult.Success)
             {
-                await positionCache.ClearAsync(signal.Instrument, ct);
+                await positionCache.ClearAsync(signal.Instrument, CancellationToken.None);
                 logger.LogInformation("Successfully closed position for {Instrument}: {Message}",
                     signal.Instrument, closeResult.Message);
             }
@@ -206,16 +212,21 @@ public class SignalExecutionHandler(
             signal.Direction, signal.Instrument, units, balance, signal.Price, stopLoss.ToString(priceFmt), stopDistance.ToString(priceFmt), takeProfit.ToString(priceFmt), targetDistance.ToString(priceFmt));
 
         // ── Place order ───────────────────────────────────────────────────────
+        // CancellationToken.None for both calls: once we decide to trade, we must
+        // see it through. Aborting PlaceMarketOrderAsync mid-flight leaves the order
+        // state at OANDA unknown. Aborting SetAsync after a fill means the position
+        // cache misses the fill — safe (no-pyramiding OANDA fallback catches it) but
+        // causes an unnecessary extra API call on the next signal.
         TradeResult result;
         using (TradeMetrics.OrderLatencySeconds.NewTimer())
         {
-            result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, ct);
+            result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, CancellationToken.None);
         }
 
         if (result.Success)
         {
             TradeMetrics.OrdersPlaced.WithLabels("success").Inc();
-            await positionCache.SetAsync(signal.Instrument, (decimal)(result.Units ?? units), ct);
+            await positionCache.SetAsync(signal.Instrument, (decimal)(result.Units ?? units), CancellationToken.None);
             logger.LogInformation(
                 "Order filled successfully for {Instrument}: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
                 signal.Instrument, result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);

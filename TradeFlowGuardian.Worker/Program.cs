@@ -79,6 +79,12 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
 builder.Services.AddScoped<SignalExecutionHandler>();
 builder.Services.AddHostedService<ExecutionWorker>();
 
+// ── Shutdown ──────────────────────────────────────────────────────────────────
+// Railway sends SIGTERM and waits 30 s before SIGKILL. Give in-flight order
+// calls (which use CancellationToken.None) time to complete before the host
+// forces shutdown. 5 s (the .NET default) is not enough.
+builder.Services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(30));
+
 // ── Metrics (Prometheus) ──────────────────────────────────────────────────────
 // Local docker-compose: port 9091. Railway: honours injected PORT env var so
 // the health check at /metrics succeeds on whatever port Railway assigns.

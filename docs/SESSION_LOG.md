@@ -106,6 +106,14 @@
   - `KestrelMetricServer` port made dynamic — reads `PORT` env var (Railway-injected) with fallback to 9091 for local docker-compose; without this Railway health-checks the injected PORT, finds nothing listening, and restart-loops
   - Health check path `/metrics`, restart policy ON_FAILURE
 - Diagnosed `GET /api/status/balance` returning `balanceAud: 0` — root cause was mismatched OANDA account/API key; resolved by user. Documented the silent-failure pattern in `GetAccountBalanceAsync` (catches all exceptions, returns 0 — actual error only visible in Railway logs)
+- Improved logging for Railway
+    - Both `Program.cs`: `ClearProviders()` + conditional format — Development keeps coloured multi-line console; Production uses `SingleLine = true` so each entry is one line in Railway's log stream
+    - Both `Program.cs`: startup config banner logs OANDA env/URL, Redis host (credentials stripped), stream, consumer (Worker), active filters — confirms loaded config at a glance on deploy
+    - Both `appsettings.json`: `StackExchange` and `System.Net.Http.HttpClient` set to `Warning`; `Microsoft.Hosting.Lifetime` kept at `Information`
+- Graceful shutdown hardening
+    - Both `Program.cs`: `HostOptions.ShutdownTimeout = 30 s` — matches Railway's SIGTERM-to-SIGKILL window (up from .NET default of 5 s)
+    - `SignalExecutionHandler`: `PlaceMarketOrderAsync`, `ClosePositionAsync`, and post-fill `positionCache.SetAsync`/`ClearAsync` all use `CancellationToken.None` — market operations must not be aborted mid-flight; OCE in `HandleAsync` now only fires during pre-order checks and log says so explicitly
+    - `ExecutionWorker`: `StopAsync` override logs "shutdown requested" / "stopped cleanly" around `base.StopAsync`; idle `DequeueAsync` OCE caught explicitly and logged as "idle at shutdown"
 
 ### 2026-04-11 (session 5)
 - Daily drawdown circuit breaker implemented (Phase 2)

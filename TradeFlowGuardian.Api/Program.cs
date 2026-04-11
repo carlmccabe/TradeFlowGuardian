@@ -71,6 +71,11 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
         sp.GetRequiredService<AtrSpikeFilter>()
     }));
 
+// ── Shutdown ──────────────────────────────────────────────────────────────────
+// Allow in-flight webhook requests to finish queuing to Redis before the host
+// stops. 30 s matches Railway's SIGTERM-to-SIGKILL grace period.
+builder.Services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(30));
+
 // ── API ───────────────────────────────────────────────────────────────────────
 builder.Services.AddControllers()
     .AddJsonOptions(opts =>
