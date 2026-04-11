@@ -5,13 +5,10 @@ using StackExchange.Redis;
 using TradeFlowGuardian.Api.Middleware;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
-using TradeFlowGuardian.Infrastructure.Calendar;
-using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.Filters;
-using TradeFlowGuardian.Infrastructure.History;
-using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
+using TradeFlowGuardian.Infrastructure.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,8 +37,6 @@ builder.Services.Configure<RiskConfig>(builder.Configuration.GetSection("Risk"))
 builder.Services.Configure<FilterConfig>(builder.Configuration.GetSection("Filters"));
 builder.Services.Configure<WebhookConfig>(builder.Configuration.GetSection("Webhook"));
 builder.Services.Configure<RedisConfig>(builder.Configuration.GetSection("Redis"));
-builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("NewsFilter"));
-builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── HTTP Client ───────────────────────────────────────────────────────────────
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
@@ -53,31 +48,20 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
-builder.Services.AddSingleton<IPauseState, RedisPauseState>();
-builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
-builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();
-builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, client =>
-{
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("TradeFlowGuardian/1.0");
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
+builder.Services.AddSingleton<IFilterStateService, RedisFilterStateService>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
-builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Filters (evaluation order — cheapest first) ───────────────────────────────
+builder.Services.AddScoped<PauseFilter>();
 builder.Services.AddScoped<SignalAgeFilter>();
 builder.Services.AddScoped<AtrSpikeFilter>();
 builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     new CompositeSignalFilter(new List<ISignalFilter>
     {
+        sp.GetRequiredService<PauseFilter>(),
         sp.GetRequiredService<SignalAgeFilter>(),
         sp.GetRequiredService<AtrSpikeFilter>()
     }));
-
-// ── Shutdown ──────────────────────────────────────────────────────────────────
-// Allow in-flight webhook requests to finish queuing to Redis before the host
-// stops. 30 s matches Railway's SIGTERM-to-SIGKILL grace period.
-builder.Services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(30));
 
 // ── API ───────────────────────────────────────────────────────────────────────
 builder.Services.AddControllers()
