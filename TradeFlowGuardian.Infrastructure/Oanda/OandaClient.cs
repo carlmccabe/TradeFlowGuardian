@@ -217,6 +217,48 @@ public class OandaClient : IOandaClient
     }
 
     /// <summary>
+    /// Returns a full price snapshot for an instrument, including Bid, Ask, Mid, and Spread.
+    /// GET /v3/accounts/{id}/pricing?instruments={instrument}
+    /// </summary>
+    public async Task<PriceSnapshot?> GetPriceSnapshotAsync(string instrument, CancellationToken ct = default)
+    {
+        var url = $"/v3/accounts/{_config.AccountId}/pricing?instruments={instrument}";
+
+        try
+        {
+            var response = await _http.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var node = JsonNode.Parse(body);
+            var price = node?["prices"]?[0];
+
+            if (price is null)
+                return null;
+
+            var bid = decimal.Parse(price["bids"]?[0]?["price"]?.ToString() ?? "0");
+            var ask = decimal.Parse(price["asks"]?[0]?["price"]?.ToString() ?? "0");
+
+            if (bid <= 0 || ask <= 0)
+                return null;
+
+            return new PriceSnapshot(
+                instrument,
+                bid,
+                ask,
+                (bid + ask) / 2m,
+                ask - bid,
+                DateTimeOffset.UtcNow
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch price snapshot for {Instrument}", instrument);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Returns net open units for an instrument. Null if no position.
     /// Positive = long, negative = short.
     /// </summary>
