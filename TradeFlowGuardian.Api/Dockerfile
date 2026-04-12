@@ -1,6 +1,10 @@
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 8080
+# HTTP_PORTS is injected by Railway at runtime; this default covers local/Docker Compose use.
+# Do NOT set ASPNETCORE_URLS here — mixing URLS and HTTP_PORTS produces a harmless but
+# noisy override warning from ASP.NET Core.
+ENV ASPNETCORE_HTTP_PORTS=8080
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
@@ -20,5 +24,4 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-# Railway injects $PORT at runtime; default to 8080 for local/Docker Compose use.
-CMD ["sh", "-c", "exec dotnet TradeFlowGuardian.Api.dll --urls http://+:${PORT:-8080}"]
+CMD ["dotnet", "TradeFlowGuardian.Api.dll"]
