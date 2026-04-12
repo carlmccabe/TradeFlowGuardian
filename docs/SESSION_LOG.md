@@ -151,6 +151,15 @@
   - `_tradeHistoryMock` wired into all 4 `SignalExecutionHandlerTests` constructors
   - All 28 tests passing
 
+### 2026-04-12
+- Switched webhook auth from HMAC-SHA256 header to `?secret=` query parameter
+  - TradingView webhooks cannot send custom headers, so X-Signature was unreachable
+  - `HmacValidationMiddleware` rewritten: reads `context.Request.Query["secret"]`, compares to `WebhookConfig.Secret` with `CryptographicOperations.FixedTimeEquals` (constant-time, prevents timing attacks)
+  - `ValidateSignature` method and `SignatureHeader` const removed; body buffering retained for downstream controllers
+  - `WebhookConfig.Secret` property unchanged — same env var binding path
+  - TradingView alert URL format: `https://<host>/api/signal?secret=YOUR_SECRET`
+  - HTTPS ensures secret is not transmitted in plaintext
+
 ### Next session goals
 - **Phase 2 complete** — all items done
 - Run `docs/migrations/001_trade_history.sql` against Railway Postgres and set `Postgres:ConnectionString` in Railway env vars for both Api and Worker

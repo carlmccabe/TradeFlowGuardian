@@ -6,12 +6,15 @@ using TradeFlowGuardian.Core.Configuration;
 namespace TradeFlowGuardian.Api.Middleware;
 
 /// <summary>
-/// Validates HMAC-SHA256 signature on incoming webhook requests.
+/// Validates incoming webhook requests by comparing the ?secret= query parameter
+/// against the configured WebhookConfig.Secret.
 ///
 /// TradingView webhook setup:
-/// 1. Set a secret string in TV alert → Webhook URL → add header X-Signature
+/// 1. Append ?secret=YOUR_SECRET to the webhook URL in the TV alert
 /// 2. Set the same secret in WebhookConfig:Secret (env var or user secrets)
 ///
+/// HTTPS ensures the secret is not transmitted in plaintext.
+/// Constant-time comparison prevents timing attacks.
 /// </summary>
 
 public class HmacValidationMiddleware(
@@ -21,61 +24,42 @@ public class HmacValidationMiddleware(
 {
     private readonly WebhookConfig _config = config.Value;
 
-    private const string SignatureHeader = "X-Signature";
     private const string WebhookPath = "/api/signal";
 
     public async Task InvokeAsync(HttpContext context)
     {
         // Only validate the signal endpoint
-        if (!context.Request.Path.StartsWithSegments(WebhookPath) 
+        if (!context.Request.Path.StartsWithSegments(WebhookPath)
             || context.Request.Method != HttpMethods.Post)
         {
             await next(context);
             return;
         }
 
-        // Buffer body so we can read it for signature + pass it downstream
+        // Buffer body so it can be read downstream
         context.Request.EnableBuffering();
         var body = await new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true).ReadToEndAsync();
         context.Request.Body.Position = 0;
 
-        if (!context.Request.Headers.TryGetValue(SignatureHeader, out var signatureHeader))
+        if (!context.Request.Query.TryGetValue("secret", out var secret))
         {
-            logger.LogWarning("Webhook request missing {Header}", SignatureHeader);
+            logger.LogWarning("Webhook request missing secret query parameter");
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync("Missing signature header");
+            await context.Response.WriteAsync("Missing secret query parameter");
             return;
         }
 
-        var signature = signatureHeader.ToString();
-        if (!ValidateSignature(body, signature))
+        var secretBytes = Encoding.UTF8.GetBytes(secret.ToString());
+        var configBytes = Encoding.UTF8.GetBytes(_config.Secret);
+
+        if (!CryptographicOperations.FixedTimeEquals(secretBytes, configBytes))
         {
-            logger.LogWarning("Webhook HMAC validation failed — possible tampered payload");
+            logger.LogWarning("Webhook secret validation failed — invalid or mismatched secret");
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync("Invalid signature");
+            await context.Response.WriteAsync("Invalid secret");
             return;
         }
 
         await next(context);
-    }
-
-    private bool ValidateSignature(string body, string signature)
-    {
-        // Strip "sha256=" prefix if present
-        var raw = signature.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase)
-            ? signature[7..]
-            : signature;
-
-        var keyBytes = Encoding.UTF8.GetBytes(_config.Secret);
-        var bodyBytes = Encoding.UTF8.GetBytes(body);
-
-        using var hmac = new HMACSHA256(keyBytes);
-        var computed = hmac.ComputeHash(bodyBytes);
-        var computedHex = Convert.ToHexString(computed).ToLowerInvariant();
-
-        // Constant-time comparison to prevent timing attacks
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(computedHex),
-            Encoding.UTF8.GetBytes(raw.ToLowerInvariant()));
     }
 }
