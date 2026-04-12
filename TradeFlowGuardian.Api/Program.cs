@@ -89,9 +89,14 @@ builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "TradeFlow Guardian API", Version = "v1" }));
 
 // ── CORS (React PWA dashboard) ────────────────────────────────────────────────
+// Dashboard:Origin accepts a comma-separated list of allowed origins so that
+// both the local dev server and the production Railway URL can be permitted
+// without a wildcard (required when AllowCredentials is set).
 builder.Services.AddCors(options =>
     options.AddPolicy("Dashboard", policy =>
-        policy.WithOrigins(builder.Configuration["Dashboard:Origin"] ?? "http://localhost:5173")
+        policy.WithOrigins(
+                  (builder.Configuration["Dashboard:Origin"] ?? "http://localhost:5173")
+                  .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials()));
