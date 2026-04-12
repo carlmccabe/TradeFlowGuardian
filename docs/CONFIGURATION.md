@@ -28,7 +28,7 @@ Bound to `WebhookConfig` from section `"Webhook"`. **Api only.**
 
 | Key | Required | Default | Description |
 |---|---|---|---|
-| `Webhook:Secret` | ✅ | — | HMAC-SHA256 secret — must match TradingView alert webhook secret |
+| `Webhook:Secret` | ✅ | — | Webhook secret token — append `?secret=<value>` to the TradingView webhook URL |
 
 ---
 

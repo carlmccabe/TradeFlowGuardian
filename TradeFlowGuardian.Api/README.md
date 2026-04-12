@@ -14,9 +14,9 @@ The Api **never executes trades** — it validates and queues only. All trading 
 POST /api/signal
 ```
 
-Receives a TradingView webhook alert. Validates the HMAC-SHA256 signature, deserialises the payload, and pushes it to the Redis Stream.
+Receives a TradingView webhook alert. Validates the `?secret=` query parameter, deserialises the payload, and pushes it to the Redis Stream.
 
-- **Auth:** `X-Signature: sha256=<hmac>` header required
+- **Auth:** `?secret=<token>` query parameter required
 - **Response 202:** signal queued
 - **Response 400:** malformed payload
 - **Response 401:** missing or invalid signature
@@ -123,38 +123,31 @@ Prometheus metrics endpoint (internal network only — not HMAC protected).
 
 ---
 
-## HMAC Authentication
+## Webhook Authentication
 
-Every `POST /api/signal` request must include:
+Every `POST /api/signal` request must include the secret as a query parameter:
 
 ```
-X-Signature: sha256=<hex digest>
+POST /api/signal?secret=<your-secret>
 ```
 
-Where the digest is `HMAC-SHA256(secret, raw request body)`.
+`secret` must match `Webhook:Secret` in the Api configuration. HTTPS ensures it is not transmitted in plaintext. Comparison is constant-time to prevent timing attacks.
 
-`secret` must match `Webhook:Secret` in the Api configuration.
-
-### Generating the signature manually (testing)
+### Testing manually
 
 ```bash
-SECRET="your-webhook-secret"
-BODY='{"instrument":"USD_JPY","direction":"Long","atr":0.245,"price":149.500,"riskPercent":0,"timestamp":"2026-04-11T00:00:00Z","idempotencyKey":"test_001"}'
-SIG=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
-
-curl -X POST https://<api-url>/api/signal \
+curl -X POST https://<api-url>/api/signal?secret=your-webhook-secret \
   -H "Content-Type: application/json" \
-  -H "X-Signature: sha256=$SIG" \
-  -d "$BODY"
+  -d '{"instrument":"USD_JPY","direction":"Long","atr":0.245,"price":149.500,"riskPercent":0,"timestamp":"2026-04-11T00:00:00Z","idempotencyKey":"test_001"}'
 ```
 
 Or use [`scripts/test-signal.sh`](../scripts/test-signal.sh) which handles this automatically.
 
 ### TradingView alert setup
 
-In TradingView alert → **Notifications → Webhook URL**:
+In TradingView alert → **Notifications → Webhook URL**, append the secret to the URL:
 ```
-https://<your-api-url>/api/signal
+https://<your-api-url>/api/signal?secret=<your-secret>
 ```
 
 Alert message body:

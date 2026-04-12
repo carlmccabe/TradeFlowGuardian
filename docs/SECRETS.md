@@ -46,7 +46,7 @@ security delete-generic-password -a tradeflow -s oanda-api-key 2>/dev/null
 # Store with strict ACL — forces system dialog on every read
 security add-generic-password -a tradeflow -s oanda-api-key    -w "your-key"  -T ""
 security add-generic-password -a tradeflow -s oanda-account-id -w "your-id"   -T ""
-security add-generic-password -a tradeflow -s webhook-secret   -w "your-hmac" -T ""
+security add-generic-password -a tradeflow -s webhook-secret   -w "your-secret" -T ""
 ```
 
 ### Reading a secret (triggers system dialog)
@@ -104,7 +104,7 @@ Create a vault named `TradeFlow` in the 1Password app, then add items:
 |---|---|---|
 | `OANDA` | `api-key` | Live API key |
 | `OANDA` | `account-id` | Live account ID |
-| `Webhook` | `secret` | HMAC secret |
+| `Webhook` | `secret` | Webhook secret token |
 
 ### Read a secret
 
@@ -139,7 +139,7 @@ container startup. Your laptop never sees them.
 ```bash
 az keyvault secret set --vault-name tradeflow-kv --name oanda-api-key    --value "your-live-key"
 az keyvault secret set --vault-name tradeflow-kv --name oanda-account-id --value "your-live-id"
-az keyvault secret set --vault-name tradeflow-kv --name webhook-secret   --value "your-hmac"
+az keyvault secret set --vault-name tradeflow-kv --name webhook-secret   --value "your-secret"
 ```
 
 ### Reference in Azure Container Apps

@@ -32,26 +32,22 @@ BODY=$(cat <<EOF
 EOF
 )
 
-# Compact JSON — must be byte-identical between what we sign and what we send
+# Compact JSON
 COMPACT=$(echo "$BODY" | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read()), separators=(',', ':')), end='')")
 
-SIG=$(echo -n "$COMPACT" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
-
 echo "---------------------------------------"
-echo "  Endpoint : $API_URL/api/signal"
+echo "  Endpoint : $API_URL/api/signal?secret=***"
 echo "  Instrument: $INSTRUMENT"
 echo "  Direction : $DIRECTION"
 echo "  Idempotency: $IDEMPOTENCY_KEY"
-echo "  Signature : sha256=$SIG"
 echo "---------------------------------------"
 echo "  Payload:"
 echo "$COMPACT" | python3 -m json.tool 2>/dev/null || echo "$COMPACT"
 echo "---------------------------------------"
 
 TMPFILE=$(mktemp)
-HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$API_URL/api/signal" \
+HTTP_CODE=$(curl -s -o "$TMPFILE" -w "%{http_code}" -X POST "$API_URL/api/signal?secret=$SECRET" \
   -H "Content-Type: application/json" \
-  -H "X-Signature: sha256=$SIG" \
   -d "$COMPACT")
 BODY_RESPONSE=$(cat "$TMPFILE")
 rm -f "$TMPFILE"
