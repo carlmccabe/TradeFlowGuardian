@@ -1,17 +1,8 @@
 [build]
 builder = "railpack"
 
-[build.env]
-NODE_VERSION = "22.12.0"
-
-[phases.install]
-cmds = ["npm ci"]
-
-[phases.build]
-cmds = ["npm run build"]
-
 [deploy]
-startCommand = "npm run preview -- --host 0.0.0.0 --port $PORT"
+startCommand = "npm run serve"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
