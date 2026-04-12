@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>TradeFlowGuardian.Strategies</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\TradeFlowGuardian.Domain\TradeFlowGuardian.Domain.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Filters\Time\" />
+      <Folder Include="Risk\" />
+      <Folder Include="Signals\Old\" />
+    </ItemGroup>
+
+</Project>

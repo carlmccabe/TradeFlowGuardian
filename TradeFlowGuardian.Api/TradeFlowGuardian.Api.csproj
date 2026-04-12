@@ -7,6 +7,7 @@
     <UserSecretsId>0c8ba922-003e-4a7c-bfa4-1ba9c0ad8b24</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\TradeFlowGuardian.Backtesting\TradeFlowGuardian.Backtesting.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Infrastructure\TradeFlowGuardian.Infrastructure.csproj" />
   </ItemGroup>

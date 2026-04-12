@@ -3,6 +3,7 @@ using Microsoft.OpenApi.Models;
 using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Api.Middleware;
+using TradeFlowGuardian.Backtesting;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Calendar;
@@ -75,6 +76,9 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
         sp.GetRequiredService<SignalAgeFilter>(),
         sp.GetRequiredService<AtrSpikeFilter>()
     }));
+
+// ── Backtest engine ───────────────────────────────────────────────────────────
+builder.Services.AddBacktestServices(builder.Configuration);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 // Allow in-flight webhook requests to finish queuing to Redis before the host
