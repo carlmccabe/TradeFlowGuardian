@@ -160,9 +160,30 @@
   - TradingView alert URL format: `https://<host>/api/signal?secret=YOUR_SECRET`
   - HTTPS ensures secret is not transmitted in plaintext
 
+### 2026-04-12 (session 2) — Backtest engine integration
+- Integrated `backtest-engine-extract/` into the solution as three new projects:
+  - `TradeFlowGuardian.Domain` — `Candle`, `IStrategy`, `Decision`, `TradeAction`, pipeline interfaces
+  - `TradeFlowGuardian.Strategies` — `EmaIndicator`, `EmaCrossoverSignal`, `PipelineBuilder`, `FilteredSignalRule`, composable filters
+  - `TradeFlowGuardian.Backtesting` — `BacktestEngine`, `BacktestDataContext` (EF Core), `OandaHistoricalProvider`
+- Namespaces renamed from `ForexApp.*` → `TradeFlowGuardian.*` (user-completed before session)
+- Fixed missing NuGet packages: `RestSharp 112.1.0` and `Newtonsoft.Json 13.0.3` added to `Infrastructure.csproj` (backtest OANDA HTTP client files were copied in without their packages — blocked the build with 37 errors)
+- Migrated `BacktestDataContext` from SQL Server to PostgreSQL:
+  - Replaced `Microsoft.EntityFrameworkCore.SqlServer` → `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.0`
+  - Removed `.IsClustered()` and `.IncludeProperties()` from `BacktestDataContext.OnModelCreating` (SQL Server-only EF fluent API)
+- `PipelineStrategy` adapter added — wraps `IPipeline` to satisfy `IStrategy` contract; maps `Core.TradeAction` (EnterLong/Short/ExitPosition) → `Domain.TradeAction` (Buy/Sell/Exit)
+- `StrategyFactory` added — named preset resolution: `emac_10_30`, `emac_9_21`, `emac_12_26`, `emac_custom`
+- `BacktestServicesExtensions.AddBacktestServices()` — single extension method wires all DI: `OandaOptions`, `RestClient`, `OandaHttpClient`, `IOandaApiService`, `IHistoricalDataProvider`, `IBacktestEngine`, `BacktestDataContext`
+- `BacktestController` added to API — `POST /api/backtest/run`, `GET /api/backtest/runs`, `GET /api/backtest/runs/{id}`, `GET /api/backtest/strategies`
+- `docs/migrations/002_backtest_tables.sql` created — `HistoricalCandles`, `BacktestRuns`, `BacktestTrades`, `BacktestEquityCurve`
+- `docs/BACKTEST.md` created — API usage, strategy presets, migration steps, cURL examples
+- Build clean: 0 errors, 2 pre-existing warnings
+- **Pending:** run `002_backtest_tables.sql` against PostgreSQL before first backtest call
+
 ### Next session goals
-- **Phase 2 complete** — all items done
-- Run `docs/migrations/001_trade_history.sql` against Railway Postgres and set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
+- Run `docs/migrations/001_trade_history.sql` and `002_backtest_tables.sql` against Railway Postgres
+- Set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
+- Add more strategy presets to `StrategyFactory` (ADX-filtered EMAC, RSI mean-reversion)
+- Phase 3 dashboard: backtest results panel (run history, equity curve chart)
 - Phase 3 dashboard: P&L chart (daily/weekly) using trade_history table
 - Phase 3 dashboard: SignalR hub for real-time P&L push
 - Phase 4: GitHub Actions CI/CD

@@ -16,6 +16,11 @@ using TradeFlowGuardian.Infrastructure.Queue;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── Npgsql ───────────────────────────────────────────────────────────────────
+// Use legacy timestamp behavior for Npgsql 6.0+ to handle Unspecified/Local kinds
+// if any property is missed in manual UTC conversion.
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 // ── Logging ───────────────────────────────────────────────────────────────────
 // Development: default multi-line console with colours.
 // Production (Railway): single-line so each entry is one line in the log stream.

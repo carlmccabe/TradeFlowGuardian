@@ -95,10 +95,10 @@ public class OandaStreamingService : IDisposable
 
         try
         {
-            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
 
-            while (!ct.IsCancellationRequested && !reader.EndOfStream)
+            while (!ct.IsCancellationRequested)
             {
                 string? line;
                 try
@@ -110,6 +110,7 @@ public class OandaStreamingService : IDisposable
                     break;
                 }
 
+                if (line == null) break;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 try
@@ -167,10 +168,10 @@ public class OandaStreamingService : IDisposable
 
         try
         {
-            using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
 
-            while (!ct.IsCancellationRequested && !reader.EndOfStream)
+            while (!ct.IsCancellationRequested)
             {
                 string? line;
                 try
@@ -182,6 +183,7 @@ public class OandaStreamingService : IDisposable
                     break;
                 }
 
+                if (line == null) break;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 try

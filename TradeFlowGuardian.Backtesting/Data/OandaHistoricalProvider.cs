@@ -160,7 +160,7 @@ public class OandaHistoricalProvider(
                         {
                             Instrument = instrument,
                             Timeframe = timeframe,
-                            Timestamp = c.Time,
+                            Timestamp = c.Time.ToUniversalTime(),
                             Open = c.Open,
                             High = c.High,
                             Low = c.Low,

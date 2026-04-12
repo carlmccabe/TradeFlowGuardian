@@ -27,13 +27,16 @@ public class BacktestEngine(
             request.EndDate.ToShortDateString());
 
         // Load historical data
-        var candles = await dataProvider.GetHistoricalDataAsync(
+        var backtestCandles = await dataProvider.GetHistoricalDataAsync(
             request.Instrument, request.Timeframe, request.StartDate, request.EndDate);
 
-        if (candles.Count < 300)
-            throw new InvalidOperationException($"Insufficient data: {candles.Count} candles. Need at least 300.");
+        if (backtestCandles.Count < 300)
+            throw new InvalidOperationException($"Insufficient data: {backtestCandles.Count} candles. Need at least 300.");
 
-        logger.LogInformation("📊 Loaded {Count} candles for backtesting", candles.Count);
+        logger.LogInformation("📊 Loaded {Count} candles for backtesting", backtestCandles.Count);
+
+        // Pre-map candles to Candle objects once for the strategy
+        var mappedCandles = backtestCandles.Select(MapToCandle).ToList();
 
         // Initialize backtest state
         var trades = new List<BacktestTrade>();
@@ -46,20 +49,21 @@ public class BacktestEngine(
         var peak = request.InitialBalance;
 
         // Main backtest loop
-        for (int i = 200; i < candles.Count; i++) // Skip warmup period
+        for (int i = 200; i < backtestCandles.Count; i++) // Skip warmup period
         {
-            logger.LogInformation("Backtest loop: {CandleIndex}/{CandleCount} -- Balance: {Balance}", i, candles.Count, balance);
+            if (i % 1000 == 0)
+                logger.LogInformation("Backtest loop: {CandleIndex}/{CandleCount} -- Balance: {Balance}", i, backtestCandles.Count, balance);
+            
             if (cancellationToken.IsCancellationRequested) break;
 
-            var currentCandles = candles.Take(i + 1).ToList();
-            var currentCandle = candles[i];
+            var currentCandle = backtestCandles[i];
 
             // Update equity and drawdown
             var unrealizedPnL = openTrade?.CalculateUnrealizedPnL(currentCandle.Close) ?? 0;
             equity = balance + unrealizedPnL;
 
             if (equity > peak) peak = equity;
-            var currentDrawdown = (peak - equity) / peak;
+            var currentDrawdown = peak == 0 ? 0 : (peak - equity) / peak;
             if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
 
             equityCurve.Add(new EquityPoint(currentCandle.Time, balance, equity, currentDrawdown));
@@ -83,7 +87,7 @@ public class BacktestEngine(
                         ExitTime = currentCandle.Time,
                         ExitPrice = exitResult.ExitPrice,
                         PnL = finalPnL,
-                        PnLPercent = finalPnL / (openTrade.Units * openTrade.EntryPrice),
+                        PnLPercent = (openTrade.Units * openTrade.EntryPrice) == 0 ? 0 : finalPnL / (openTrade.Units * openTrade.EntryPrice),
                         Commission = commission,
                         Slippage = slippage,
                         ExitReason = exitResult.Reason
@@ -103,8 +107,12 @@ public class BacktestEngine(
 
             var hasPosition = false;
             var isLong = false;
+            
+            // Use a segment view to avoid O(N) ToList() calls in every loop iteration
+            var strategyCandles = new ReadOnlyListSegment<Candle>(mappedCandles, 0, i + 1);
+            
             var decision = request.Strategy.Evaluate(
-                currentCandles.Select(MapToCandle).ToList().AsReadOnly(),
+                strategyCandles,
                 currentCandle.Time, hasPosition, isLong);
 
             if(decision.Action != TradeAction.Buy && decision.Action != TradeAction.Sell) continue; // No decision
@@ -208,9 +216,12 @@ public class BacktestEngine(
 
         // Calculate returns for Sharpe ratio (use double pipeline for math functions)
         var dailyReturns = CalculateDailyReturns(equityCurve); // List<double>
-        var avgDailyReturn = dailyReturns.Average(); // double
-        var dailyVolatility = Math.Sqrt(dailyReturns.Sum(r => Math.Pow(r - avgDailyReturn, 2)) / dailyReturns.Count);
-        var sharpeRatio = dailyVolatility == 0 ? 0 : (decimal)(avgDailyReturn / dailyVolatility * Math.Sqrt(252));
+        var avgDailyReturn = dailyReturns.Any() ? dailyReturns.Average() : 0; // double
+        var dailyVolatility = dailyReturns.Any() 
+            ? Math.Sqrt(dailyReturns.Sum(r => Math.Pow(r - avgDailyReturn, 2)) / dailyReturns.Count)
+            : 0;
+        
+        var sharpeRatio = dailyVolatility == 0 ? 0 : SafeToDecimal(avgDailyReturn / dailyVolatility * Math.Sqrt(252));
 
         // Sortino ratio (downside deviation only)
         var downsideReturns = dailyReturns.Where(r => r < 0).ToList();
@@ -219,18 +230,20 @@ public class BacktestEngine(
             : 0;
         var sortinoRatio = downsideVolatility == 0
             ? 0
-            : (decimal)(avgDailyReturn / downsideVolatility * Math.Sqrt(252));
+            : SafeToDecimal(avgDailyReturn / downsideVolatility * Math.Sqrt(252));
 
         // Maximum drawdown
-        var maxDrawdown = equityCurve.Max(e => e.DrawdownPercent);
+        var maxDrawdown = equityCurve.Any() ? equityCurve.Max(e => e.DrawdownPercent) : 0;
 
         // Calmar ratio
-        var totalDays = (equityCurve.Last().Timestamp - equityCurve.First().Timestamp).TotalDays;
-        var endEquity = equityCurve.Last().Equity;
-        var annualizedReturn = totalDays <= 0
+        var totalDays = equityCurve.Any() 
+            ? (equityCurve.Last().Timestamp - equityCurve.First().Timestamp).TotalDays
+            : 0;
+        var endEquity = equityCurve.Any() ? equityCurve.Last().Equity : initialBalance;
+        var annualizedReturn = totalDays <= 0 || initialBalance == 0
             ? 0d
             : Math.Pow((double)(endEquity / initialBalance), 365.0 / totalDays) - 1d;
-        var calmarRatio = maxDrawdown == 0 ? 0 : (decimal)annualizedReturn / maxDrawdown;
+        var calmarRatio = maxDrawdown == 0 ? 0 : SafeToDecimal(annualizedReturn) / maxDrawdown;
 
 
         return new BacktestMetrics
@@ -250,13 +263,22 @@ public class BacktestEngine(
             SharpeRatio = sharpeRatio,
             SortinoRatio = sortinoRatio,
             CalmarRatio = calmarRatio,
-            AverageTradeDuration =
-                TimeSpan.FromMilliseconds(trades.Average(t => (t.ExitTime - t.EntryTime).TotalMilliseconds)),
-            ProfitabilityIndex = trades.Count == 0
+            AverageTradeDuration = trades.Any()
+                ? TimeSpan.FromMilliseconds(trades.Average(t => (t.ExitTime - t.EntryTime).TotalMilliseconds))
+                : TimeSpan.Zero,
+            ProfitabilityIndex = trades.Count == 0 || winners.Count == 0 || Math.Abs(trades.Average(t => Math.Abs(t.PnL))) == 0
                 ? 0
                 : winners.Count * winners.Average(t => t.PnL) /
                   (trades.Count * Math.Abs(trades.Average(t => Math.Abs(t.PnL))))
         };
+    }
+
+    private static decimal SafeToDecimal(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value)) return 0;
+        if (value > (double)decimal.MaxValue) return decimal.MaxValue;
+        if (value < (double)decimal.MinValue) return decimal.MinValue;
+        return (decimal)value;
     }
 
     private (bool ShouldExit, decimal ExitPrice, string Reason) CheckExitConditions(BacktestTrade openTrade,
@@ -351,6 +373,7 @@ public class BacktestEngine(
 
     private double CalculateSortinoRatio(List<decimal> dailyReturns)
     {
+        if (!dailyReturns.Any()) return 0;
         var avgReturn = (double)dailyReturns.Average();
         var downsideReturns = dailyReturns.Where(r => r < 0).ToList();
 
@@ -359,6 +382,32 @@ public class BacktestEngine(
         var downsideDeviation = Math.Sqrt(downsideReturns.Sum(r => Math.Pow((double)r, 2)) / downsideReturns.Count);
 
         return downsideDeviation == 0 ? 0 : avgReturn / downsideDeviation * Math.Sqrt(252);
+    }
+
+    /// <summary>
+    /// A lightweight wrapper to provide a segment of a list as IReadOnlyList without copying.
+    /// Improves performance of backtest loop from O(N^2) to O(N).
+    /// </summary>
+    private class ReadOnlyListSegment<T>(IReadOnlyList<T> list, int offset, int count) : IReadOnlyList<T>
+    {
+        public T this[int index]
+        {
+            get
+            {
+                if (index < 0 || index >= count) throw new IndexOutOfRangeException();
+                return list[offset + index];
+            }
+        }
+
+        public int Count => count;
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            for (int i = 0; i < count; i++)
+                yield return list[offset + i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     public async Task SaveBacktestResultAsync(BacktestResult result)
@@ -400,9 +449,9 @@ public class BacktestEngine(
             TradeNumber = t.TradeNumber,
             Instrument = t.Instrument,
             Direction = t.Direction,
-            EntryTime = t.EntryTime,
+            EntryTime = t.EntryTime.ToUniversalTime(),
             EntryPrice = t.EntryPrice,
-            ExitTime = t.ExitTime,
+            ExitTime = t.ExitTime.ToUniversalTime(),
             ExitPrice = t.ExitPrice,
             Units = t.Units,
             StopLoss = t.StopLoss,
@@ -425,7 +474,7 @@ public class BacktestEngine(
             .Select(e => new BacktestEquityPoint
             {
                 BacktestRunId = result.Id,
-                Timestamp = e.Timestamp,
+                Timestamp = e.Timestamp.ToUniversalTime(),
                 Balance = e.Balance,
                 Equity = e.Equity,
                 DrawdownPercent = e.DrawdownPercent

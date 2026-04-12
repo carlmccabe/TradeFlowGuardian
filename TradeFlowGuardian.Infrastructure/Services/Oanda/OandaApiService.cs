@@ -254,7 +254,7 @@ public class OandaApiService : IOandaApiService
                             {
                                 Instrument = instrument,
                                 Granularity = granularity,
-                                Time = DateTime.Parse((string)candleData.time), // Use Time instead of Timestamp
+                                Time = DateTime.Parse((string)candleData.time).ToUniversalTime(), // Use Time instead of Timestamp
                                 Open = (decimal)candleData.mid.o,
                                 High = (decimal)candleData.mid.h,
                                 Low = (decimal)candleData.mid.l,
@@ -322,7 +322,7 @@ public class OandaApiService : IOandaApiService
                         {
                             Instrument = instrument,
                             Granularity = granularity,
-                            Time = DateTime.Parse((string)candleData.time),
+                            Time = DateTime.Parse((string)candleData.time).ToUniversalTime(),
                             Open = (decimal)candleData.mid.o,
                             High = (decimal)candleData.mid.h,
                             Low = (decimal)candleData.mid.l,
