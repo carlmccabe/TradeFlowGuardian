@@ -48,8 +48,10 @@ builder.Services.AddHttpClient<IOandaClient, OandaClient>();
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(
-        builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+{
+    var cs = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+    return ConnectionMultiplexer.Connect(ParseRedisOptions(cs));
+});
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
@@ -142,3 +144,33 @@ app.Run();
 // Strips auth credentials from both redis://user:pass@host and host:port formats.
 static string RedisHost(string cs) =>
     System.Text.RegularExpressions.Regex.Replace(cs, @"redis://[^@]+@", "").Split(',')[0];
+
+// StackExchange.Redis does not understand redis:// / rediss:// URI format.
+// Railway (and many other providers) supply the connection string in that form,
+// so we parse it manually and build ConfigurationOptions from the URI components.
+// Plain host:port[,options] strings are forwarded to ConfigurationOptions.Parse().
+static ConfigurationOptions ParseRedisOptions(string cs)
+{
+    if (cs.StartsWith("redis://", StringComparison.OrdinalIgnoreCase) ||
+        cs.StartsWith("rediss://", StringComparison.OrdinalIgnoreCase))
+    {
+        var uri = new Uri(cs);
+        var opts = new ConfigurationOptions
+        {
+            Ssl = cs.StartsWith("rediss://", StringComparison.OrdinalIgnoreCase),
+            AbortOnConnectFail = false,
+        };
+        opts.EndPoints.Add(uri.Host, uri.Port > 0 ? uri.Port : 6379);
+        if (!string.IsNullOrEmpty(uri.UserInfo))
+        {
+            var parts = uri.UserInfo.Split(':', 2);
+            if (parts.Length == 2 && !string.IsNullOrEmpty(parts[1]))
+                opts.Password = Uri.UnescapeDataString(parts[1]);
+        }
+        return opts;
+    }
+
+    var options = ConfigurationOptions.Parse(cs);
+    options.AbortOnConnectFail = false;
+    return options;
+}
