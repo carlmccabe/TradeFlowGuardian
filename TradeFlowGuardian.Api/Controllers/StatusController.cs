@@ -7,6 +7,7 @@ namespace TradeFlowGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public class StatusController(
     IOandaClient oanda,
     IPauseState pauseState,
