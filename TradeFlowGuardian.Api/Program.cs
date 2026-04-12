@@ -48,8 +48,12 @@ builder.Services.AddHttpClient<IOandaClient, OandaClient>();
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(
-        builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+{
+    var cs = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+    var opts = ConfigurationOptions.Parse(cs);
+    opts.AbortOnConnectFail = false;
+    return ConnectionMultiplexer.Connect(opts);
+});
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();

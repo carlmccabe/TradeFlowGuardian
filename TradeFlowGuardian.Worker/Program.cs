@@ -51,8 +51,12 @@ builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, clien
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(
-        builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+{
+    var cs = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
+    var opts = ConfigurationOptions.Parse(cs);
+    opts.AbortOnConnectFail = false;
+    return ConnectionMultiplexer.Connect(opts);
+});
 
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
