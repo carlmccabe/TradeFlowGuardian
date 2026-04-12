@@ -6,6 +6,8 @@ const BASE = import.meta.env.VITE_API_URL
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    // no-store bypasses the HTTP cache entirely — prevents 304s on polling calls
+    cache: 'no-store',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })
