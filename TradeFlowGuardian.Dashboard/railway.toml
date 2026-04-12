@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "npm install && npm run build"
 
 [phases.setup]
-nixPkgs = ["nodejs-20_x"]
+nixPkgs = ["nodejs_22"]
 
 [deploy]
 startCommand = "npx vite preview --host 0.0.0.0 --port $PORT"
