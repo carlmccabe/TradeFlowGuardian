@@ -22,6 +22,21 @@ public record BacktestTrade
     public decimal? MAE { get; init; } // Maximum Adverse Excursion
     public decimal? MFE { get; init; } // Maximum Favorable Excursion
 
+    /// <summary>
+    /// Trade outcome expressed as a multiple of initial risk.
+    /// 1R = won exactly the amount risked. -1R = stopped out at SL.
+    /// Null when StopLoss is not set (risk basis unknown).
+    /// </summary>
+    public decimal? RMultiple
+    {
+        get
+        {
+            if (!StopLoss.HasValue || Units == 0) return null;
+            var initialRisk = Math.Abs(EntryPrice - StopLoss.Value) * Units;
+            return initialRisk == 0 ? null : Math.Round(PnL / initialRisk, 2);
+        }
+    }
+
     public decimal CalculateUnrealizedPnL(decimal currentPrice)
     {
         var priceChange = Direction == "Long" ? currentPrice - EntryPrice : EntryPrice - currentPrice;

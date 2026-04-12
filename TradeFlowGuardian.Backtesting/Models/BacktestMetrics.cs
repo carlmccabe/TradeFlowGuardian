@@ -19,4 +19,24 @@ public record BacktestMetrics
     public decimal ProfitabilityIndex { get; init; }
     public decimal RecoveryFactor { get; init; } // Net Profit / Max Drawdown
     public decimal ExpectancyRatio { get; init; } // (Win% * Avg Win) - (Loss% * Avg Loss)
+
+    /// <summary>P&amp;L and trade stats broken down by calendar month. Ordered chronologically.</summary>
+    public List<MonthlyPerformance> MonthlyBreakdown { get; init; } = [];
+}
+
+/// <summary>
+/// Aggregated performance stats for a single calendar month.
+/// Used to detect seasonality and regime drift across the backtest period.
+/// </summary>
+public record MonthlyPerformance(
+    int Year,
+    int Month,
+    decimal PnL,
+    int Trades,
+    int Wins,
+    decimal WinRate,
+    decimal AverageR)
+{
+    /// <summary>Human-readable label, e.g. "2025-03".</summary>
+    public string Label => $"{Year:D4}-{Month:D2}";
 }

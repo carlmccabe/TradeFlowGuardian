@@ -246,16 +246,40 @@ public class BacktestEngine(
         var calmarRatio = maxDrawdown == 0 ? 0 : SafeToDecimal(annualizedReturn) / maxDrawdown;
 
 
+        // Monthly breakdown — group by entry month, ordered chronologically
+        var monthlyBreakdown = trades
+            .GroupBy(t => new { t.EntryTime.Year, t.EntryTime.Month })
+            .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+            .Select(g =>
+            {
+                var mWins = g.Count(t => t.PnL > 0);
+                var mCount = g.Count();
+                var rValues = g.Where(t => t.RMultiple.HasValue).Select(t => t.RMultiple!.Value).ToList();
+                return new MonthlyPerformance(
+                    g.Key.Year,
+                    g.Key.Month,
+                    g.Sum(t => t.PnL),
+                    mCount,
+                    mWins,
+                    mCount > 0 ? Math.Round((decimal)mWins / mCount, 4) : 0,
+                    rValues.Any() ? Math.Round(rValues.Average(), 2) : 0);
+            })
+            .ToList();
+
+        var netProfit = trades.Sum(t => t.PnL);
+        var lossSum = losers.Sum(t => Math.Abs(t.PnL));
+        var avgWin = winners.Any() ? winners.Average(t => t.PnL) : 0;
+        var avgLoss = losers.Any() ? Math.Abs(losers.Average(t => t.PnL)) : 0;
+        var winRate = (decimal)winners.Count / trades.Count;
+
         return new BacktestMetrics
         {
             TotalTrades = trades.Count,
             WinningTrades = winners.Count,
             LosingTrades = losers.Count,
-            WinRate = (decimal)winners.Count / trades.Count,
-            ProfitFactor = losers.Sum(t => Math.Abs(t.PnL)) == 0
-                ? 0
-                : winners.Sum(t => t.PnL) / losers.Sum(t => Math.Abs(t.PnL)),
-            AverageWin = winners.Any() ? winners.Average(t => t.PnL) : 0,
+            WinRate = winRate,
+            ProfitFactor = lossSum == 0 ? 0 : winners.Sum(t => t.PnL) / lossSum,
+            AverageWin = avgWin,
             AverageLoss = losers.Any() ? losers.Average(t => t.PnL) : 0,
             LargestWin = winners.Any() ? winners.Max(t => t.PnL) : 0,
             LargestLoss = losers.Any() ? losers.Min(t => t.PnL) : 0,
@@ -269,7 +293,10 @@ public class BacktestEngine(
             ProfitabilityIndex = trades.Count == 0 || winners.Count == 0 || Math.Abs(trades.Average(t => Math.Abs(t.PnL))) == 0
                 ? 0
                 : winners.Count * winners.Average(t => t.PnL) /
-                  (trades.Count * Math.Abs(trades.Average(t => Math.Abs(t.PnL))))
+                  (trades.Count * Math.Abs(trades.Average(t => Math.Abs(t.PnL)))),
+            RecoveryFactor = maxDrawdown == 0 ? 0 : netProfit / (maxDrawdown * initialBalance),
+            ExpectancyRatio = winRate * avgWin - (1 - winRate) * avgLoss,
+            MonthlyBreakdown = monthlyBreakdown
         };
     }
 
@@ -525,21 +552,50 @@ public class BacktestEngine(
             e.Timestamp, e.Balance, e.Equity, e.DrawdownPercent
         )).ToList();
 
+        // Recompute runtime-only metrics from the loaded trade list
+        var winRate = dbRun.WinRate ?? 0;
+        var avgWin = dbRun.AverageWin ?? 0;
+        var avgLoss = dbRun.AverageLoss.HasValue ? Math.Abs(dbRun.AverageLoss.Value) : 0;
+
+        var monthlyBreakdown = trades
+            .GroupBy(t => new { t.EntryTime.Year, t.EntryTime.Month })
+            .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+            .Select(g =>
+            {
+                var mWins = g.Count(t => t.PnL > 0);
+                var mCount = g.Count();
+                var rValues = g.Where(t => t.RMultiple.HasValue).Select(t => t.RMultiple!.Value).ToList();
+                return new MonthlyPerformance(
+                    g.Key.Year,
+                    g.Key.Month,
+                    g.Sum(t => t.PnL),
+                    mCount,
+                    mWins,
+                    mCount > 0 ? Math.Round((decimal)mWins / mCount, 4) : 0,
+                    rValues.Any() ? Math.Round(rValues.Average(), 2) : 0);
+            })
+            .ToList();
+
         var metrics = new BacktestMetrics
         {
             TotalTrades = dbRun.TotalTrades,
             WinningTrades = dbRun.WinningTrades,
             LosingTrades = dbRun.LosingTrades,
-            WinRate = dbRun.WinRate ?? 0,
+            WinRate = winRate,
             ProfitFactor = dbRun.ProfitFactor ?? 0,
-            AverageWin = dbRun.AverageWin ?? 0,
+            AverageWin = avgWin,
             AverageLoss = dbRun.AverageLoss ?? 0,
             LargestWin = dbRun.LargestWin ?? 0,
             LargestLoss = dbRun.LargestLoss ?? 0,
             MaxDrawdown = dbRun.MaxDrawdown,
             SharpeRatio = dbRun.SharpeRatio ?? 0,
             SortinoRatio = dbRun.SortinoRatio ?? 0,
-            CalmarRatio = dbRun.CalmarRatio ?? 0
+            CalmarRatio = dbRun.CalmarRatio ?? 0,
+            RecoveryFactor = dbRun.MaxDrawdown == 0 || dbRun.InitialBalance == 0
+                ? 0
+                : (dbRun.FinalBalance - dbRun.InitialBalance) / (dbRun.MaxDrawdown * dbRun.InitialBalance),
+            ExpectancyRatio = winRate * avgWin - (1 - winRate) * avgLoss,
+            MonthlyBreakdown = monthlyBreakdown
         };
 
         return new BacktestResult

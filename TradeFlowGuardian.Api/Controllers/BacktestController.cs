@@ -11,6 +11,7 @@ namespace TradeFlowGuardian.Api.Controllers;
 [Route("api/backtest")]
 public class BacktestController(
     IBacktestEngine engine,
+    IHistoricalDataProvider dataProvider,
     BacktestDataContext db,
     ILogger<BacktestController> logger) : ControllerBase
 {
@@ -130,6 +131,74 @@ public class BacktestController(
     [HttpGet("strategies")]
     [ProducesResponseType(typeof(IReadOnlyList<string>), StatusCodes.Status200OK)]
     public IActionResult GetStrategies() => Ok(StrategyFactory.SupportedPresets);
+
+    /// <summary>
+    /// Reports how much historical data is cached for a given instrument/timeframe/period.
+    /// Run this before a backtest to confirm data quality.
+    /// Returns coverage %, candle counts, and the earliest/latest dates available in the DB.
+    /// A coverage below 80% means the backtest engine will trigger a live OANDA fetch.
+    /// </summary>
+    [HttpGet("data/coverage")]
+    [ProducesResponseType(typeof(DataCoverageResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetDataCoverage(
+        [FromQuery] string instrument,
+        [FromQuery] string timeframe,
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate)
+    {
+        if (string.IsNullOrWhiteSpace(instrument) || string.IsNullOrWhiteSpace(timeframe))
+            return BadRequest(new { error = "instrument and timeframe are required." });
+
+        if (endDate <= startDate)
+            return BadRequest(new { error = "endDate must be after startDate." });
+
+        var candlesFound = await db.HistoricalCandles
+            .Where(c => c.Instrument == instrument
+                     && c.Timeframe == timeframe
+                     && c.Timestamp >= startDate
+                     && c.Timestamp <= endDate)
+            .CountAsync();
+
+        var candlesExpected = CalculateExpectedCandleCount(startDate, endDate, timeframe);
+        var coveragePct = candlesExpected == 0
+            ? 0m
+            : Math.Round((decimal)candlesFound / candlesExpected * 100, 1);
+
+        var earliest = await dataProvider.GetEarliestDataDateAsync(instrument, timeframe);
+        var latest   = await dataProvider.GetLatestDataDateAsync(instrument, timeframe);
+
+        return Ok(new DataCoverageResponse(
+            Instrument:       instrument,
+            Timeframe:        timeframe,
+            StartDate:        startDate,
+            EndDate:          endDate,
+            CandlesFound:     candlesFound,
+            CandlesExpected:  candlesExpected,
+            CoveragePercent:  coveragePct,
+            IsAvailable:      coveragePct >= 80m,
+            EarliestCached:   earliest,
+            LatestCached:     latest));
+    }
+
+    /// <summary>Candle count estimate: total minutes / candle-minutes × 0.71 (weekend exclusion).</summary>
+    private static int CalculateExpectedCandleCount(DateTime start, DateTime end, string timeframe)
+    {
+        var candleMinutes = timeframe switch
+        {
+            "M1"  => 1,
+            "M5"  => 5,
+            "M15" => 15,
+            "M30" => 30,
+            "H1"  => 60,
+            "H4"  => 240,
+            "D"   => 1440,
+            _     => 5
+        };
+        var totalMinutes = (end - start).TotalMinutes;
+        // ~71% of calendar time is forex trading time (Mon 17:00 – Fri 17:00 EST)
+        return (int)(totalMinutes / candleMinutes * 0.71);
+    }
 }
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -191,3 +260,16 @@ public record BacktestRunSummary(
     decimal? WinRate,
     int      TotalTrades,
     DateTime CreatedAt);
+
+/// <summary>Response for GET /api/backtest/data/coverage.</summary>
+public record DataCoverageResponse(
+    string    Instrument,
+    string    Timeframe,
+    DateTime  StartDate,
+    DateTime  EndDate,
+    int       CandlesFound,
+    int       CandlesExpected,
+    decimal   CoveragePercent,
+    bool      IsAvailable,
+    DateTime? EarliestCached,
+    DateTime? LatestCached);
