@@ -1,12 +1,17 @@
 [build]
-builder = "nixpacks"
-buildCommand = "npm install && npm run build"
+builder = "railpack"
 
-[phases.setup]
-nixPkgs = ["nodejs_22"]
+[build.env]
+NODE_VERSION = "22.12.0"
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
 
 [deploy]
-startCommand = "npx vite preview --host 0.0.0.0 --port $PORT"
+startCommand = "npm run preview -- --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
