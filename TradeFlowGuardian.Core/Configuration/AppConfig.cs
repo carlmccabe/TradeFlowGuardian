@@ -48,7 +48,7 @@ public class FilterConfig
 
 public class WebhookConfig
 {
-    /// <summary>HMAC-SHA256 secret — must match TradingView alert webhook secret</summary>
+    /// <summary>Webhook secret token — append ?secret=&lt;value&gt; to the TradingView webhook URL</summary>
     public required string Secret { get; init; }
 }
 

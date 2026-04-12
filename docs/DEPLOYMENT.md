@@ -65,7 +65,7 @@ Railway picks up `TradeFlowGuardian.Worker/railway.toml`:
 | `Oanda__ApiKey` | `<your key>` | Double underscore — .NET config binding |
 | `Oanda__AccountId` | `<your account id>` | |
 | `Oanda__Environment` | `fxpractice` | Change to `fxtrade` for live |
-| `Webhook__Secret` | `<your hmac secret>` | Must match TradingView alert header |
+| `Webhook__Secret` | `<your secret>` | Append `?secret=<value>` to the webhook URL in TradingView |
 | `Redis__ConnectionString` | From Redis plugin | See below |
 | `Postgres__ConnectionString` | From Postgres plugin | See below |
 | `Dashboard__Origin` | `https://<your-dashboard-url>` | CORS — omit if no dashboard yet |
@@ -156,14 +156,11 @@ curl https://<your-api-url>/api/status/db
    https://<your-api-url>/api/signal
    ```
 
-2. Add header:
+2. Append your secret to the URL:
    ```
-   X-Signature: sha256={{hmac_sha256(secret, message)}}
+   https://<your-api-url>/api/signal?secret=<your-secret>
    ```
-   Where `secret` matches `Webhook__Secret` in Railway.
-
-   Or use TradingView's built-in webhook secret field — TV will send
-   `X-Signature: sha256=<computed>` automatically.
+   Where `<your-secret>` matches `Webhook__Secret` in Railway.
 
 3. Alert message body (JSON):
    ```json
@@ -208,7 +205,7 @@ required ones will prevent startup if missing.
 | `Oanda__ApiKey` | ✅ | — | OANDA API key |
 | `Oanda__AccountId` | ✅ | — | OANDA account ID |
 | `Oanda__Environment` | | `fxpractice` | `fxpractice` or `fxtrade` |
-| `Webhook__Secret` | ✅ (Api) | — | HMAC-SHA256 secret for TradingView |
+| `Webhook__Secret` | ✅ (Api) | — | Webhook secret token — append `?secret=<value>` to the webhook URL |
 | `Redis__ConnectionString` | ✅ | `localhost:6379` | Railway Redis URL |
 | `Redis__StreamName` | | `tradeflow:signals` | Redis Stream key |
 | `Postgres__ConnectionString` | ✅ | `""` | Railway Postgres URL (Npgsql format). Empty disables history writes (warning logged). |

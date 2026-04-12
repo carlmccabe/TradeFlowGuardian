@@ -42,7 +42,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - **Idempotency** — TradeSignal.IdempotencyKey prevents duplicate execution
 - **Filters run in Worker, not Api** — Api just validates and queues; Worker decides
 - **Redis Streams queue** — XADD in Api, XREADGROUP + XACK in Worker; consumer group `workers`
-- **HMAC validation** — POST /api/signal only; GET endpoints are unauthenticated
+- **Secret query param validation** — POST /api/signal only (`?secret=`); GET endpoints are unauthenticated
 - **Live FX rates** — PositionSizer calls OANDA `/pricing` endpoint; conservative hardcoded fallbacks on failure
 - **Trade history write-after-execute** — ITradeHistoryRepository.InsertAsync called with CancellationToken.None after every order attempt; log-and-swallow so a DB outage never masks a fill
 - **Migrations are manual SQL** — run `docs/migrations/*.sql` in order; no EF, no auto-runner
@@ -56,9 +56,9 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - [x] PositionSizer — mirrors Pine Script Section 5 risk formula
 - [x] InMemorySignalQueue — Channel<TradeSignal> bounded queue
 - [x] Filters — SignalAgeFilter, AtrSpikeFilter, CompositeSignalFilter
-- [x] SignalController — POST /api/signal (HMAC validated)
+- [x] SignalController — POST /api/signal (?secret= query param validated)
 - [x] StatusController — balance, position query, emergency close
-- [x] HmacValidationMiddleware — POST /api/signal only
+- [x] HmacValidationMiddleware — POST /api/signal only (now uses ?secret= query param)
 - [x] Dockerfiles for Api and Worker
 - [x] docker-compose for local dev
 - [x] Migrated to .NET 10 LTS

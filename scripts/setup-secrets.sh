@@ -14,7 +14,7 @@ SERVICE_PREFIX="tradeflow"
 SECRETS=(
   "oanda-api-key:OANDA API Key"
   "oanda-account-id:OANDA Account ID"
-  "webhook-secret:Webhook HMAC Secret"
+  "webhook-secret:Webhook Secret"
 )
 
 store_secret() {
