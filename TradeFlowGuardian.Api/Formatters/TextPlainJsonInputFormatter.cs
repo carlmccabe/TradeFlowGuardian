@@ -34,7 +34,7 @@ public class TextPlainJsonInputFormatter : InputFormatter
         }
         catch (JsonException ex)
         {
-            context.ModelState.AddModelError(context.FieldName, ex.Message);
+            context.ModelState.AddModelError(string.Empty, ex.Message);
             return InputFormatterResult.Failure();
         }
     }
