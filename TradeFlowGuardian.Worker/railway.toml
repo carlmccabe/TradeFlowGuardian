@@ -12,7 +12,5 @@ dockerfilePath = "Dockerfile"
 buildContext = ".."
 
 [deploy]
-healthcheckPath = "/metrics"
-healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
