@@ -73,14 +73,19 @@ public class TradeHistoryRepository(
 
     private static string NormalizeConnectionString(string connectionString)
     {
-        if (string.IsNullOrWhiteSpace(connectionString))
+        connectionString = connectionString?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrEmpty(connectionString))
             return string.Empty;
 
         if (!connectionString.Contains("://", StringComparison.Ordinal))
             return connectionString;
 
+        // URI format (e.g. postgresql://user:pass@host:5432/db from Railway).
+        // If parsing fails, return empty rather than forwarding the raw URL to
+        // NpgsqlConnection — that causes a confusing "index 0" format error.
         if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
-            return connectionString;
+            return string.Empty;
 
         var builder = new NpgsqlConnectionStringBuilder
         {

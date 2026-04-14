@@ -184,16 +184,35 @@ public class SignalExecutionHandler(
         var isJpy    = signal.Instrument.Contains("JPY");
         var priceFmt = isJpy ? "F3" : "F5";
 
+        // TODO (robustness): fetch current OANDA bid/ask and verify SL/TP straddle the
+        // live price before submitting. This would catch stale pre-calculated levels and
+        // prevent TAKE_PROFIT_ON_FILL_LOSS rejections. Requires one extra /pricing call —
+        // consider sharing the price already fetched by PositionSizer to avoid a second round-trip.
         decimal stopLoss, takeProfit;
         if (signal.StopLoss > 0 && signal.TakeProfit > 0)
         {
-            // Use pre-calculated SL/TP sent directly from Pine Script
+            // Pre-calculated SL/TP from Pine Script — trusted as-is.
+            // Price is optional in this path; a signal with price=0 is valid.
             stopLoss   = signal.StopLoss;
             takeProfit = signal.TakeProfit;
+            logger.LogDebug("Using pre-calculated SL/TP for {Instrument}: SL={SL} TP={TP}",
+                signal.Instrument, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
         }
         else
         {
-            // Fall back to server-side ATR-based calculation (requires signal.Price)
+            // ATR-based server-side calculation — requires both Price and ATR.
+            if (signal.Price <= 0 || signal.Atr <= 0)
+            {
+                logger.LogError(
+                    "Aborting signal for {Instrument}: ATR-based SL/TP requires Price and ATR " +
+                    "(Price={Price}, Atr={Atr}). Send pre-calculated StopLoss/TakeProfit or include both.",
+                    signal.Instrument, signal.Price, signal.Atr);
+                return;
+            }
+
+            logger.LogDebug("Calculating SL/TP from ATR for {Instrument}: Price={Price} ATR={Atr}",
+                signal.Instrument, signal.Price.ToString(priceFmt), signal.Atr);
+
             var stopDistance   = signal.Atr * _risk.AtrStopMultiplier;
             var targetDistance = signal.Atr * _risk.AtrTargetMultiplier;
 
