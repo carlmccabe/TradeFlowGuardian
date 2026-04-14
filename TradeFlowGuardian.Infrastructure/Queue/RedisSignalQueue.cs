@@ -134,12 +134,14 @@ public class RedisSignalQueue : ISignalQueue
 
         try
         {
-            // $ = only deliver messages added after this point (don't replay history)
+            // 0 = deliver all messages from the beginning of the stream.
+            // On restart the group already exists (BUSYGROUP) so this path is skipped
+            // and Redis resumes from the last-delivered-id automatically.
             // createStream: true = MKSTREAM flag — creates stream if it doesn't exist
             await _db.StreamCreateConsumerGroupAsync(
                 _config.StreamName,
                 _config.ConsumerGroup,
-                StreamPosition.NewMessages,
+                StreamPosition.Beginning,
                 createStream: true);
 
             _logger.LogInformation(
