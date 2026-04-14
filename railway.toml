@@ -3,7 +3,7 @@
 
 [build]
 # Dockerfile is not at the repo root — it needs the root as build context
-# because it COPY-references sibling projects (Core, Infrastructure).
+# because it COPY-references sibling projects (Core, Infrastructure, Domain, Strategies, Backtesting).
 dockerfilePath = "TradeFlowGuardian.Api/Dockerfile"
 buildContext = "."
 

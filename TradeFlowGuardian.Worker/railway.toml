@@ -5,7 +5,7 @@
 #
 # That makes dockerfilePath resolve to TradeFlowGuardian.Worker/Dockerfile
 # and buildContext ".." resolve to the repo root — required because the
-# Dockerfile copies sibling projects Core and Infrastructure.
+# Dockerfile copies sibling projects Core, Infrastructure, Domain, and Strategies.
 
 [build]
 dockerfilePath = "Dockerfile"

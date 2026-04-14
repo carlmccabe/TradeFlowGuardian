@@ -8,6 +8,9 @@ WORKDIR /src
 COPY ["TradeFlowGuardian.Api/TradeFlowGuardian.Api.csproj", "TradeFlowGuardian.Api/"]
 COPY ["TradeFlowGuardian.Core/TradeFlowGuardian.Core.csproj", "TradeFlowGuardian.Core/"]
 COPY ["TradeFlowGuardian.Infrastructure/TradeFlowGuardian.Infrastructure.csproj", "TradeFlowGuardian.Infrastructure/"]
+COPY ["TradeFlowGuardian.Backtesting/TradeFlowGuardian.Backtesting.csproj", "TradeFlowGuardian.Backtesting/"]
+COPY ["TradeFlowGuardian.Domain/TradeFlowGuardian.Domain.csproj", "TradeFlowGuardian.Domain/"]
+COPY ["TradeFlowGuardian.Strategies/TradeFlowGuardian.Strategies.csproj", "TradeFlowGuardian.Strategies/"]
 RUN dotnet restore "TradeFlowGuardian.Api/TradeFlowGuardian.Api.csproj"
 
 COPY . .
