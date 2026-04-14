@@ -28,8 +28,8 @@ public class TradeSignal
     /// <summary>Pre-calculated take profit price from Pine Script — skips server-side ATR TP calculation when > 0</summary>
     public decimal TakeProfit { get; init; }
 
-    /// <summary>TV alert timestamp UTC — signals older than 60s are rejected. Defaults to server receive time when omitted.</summary>
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
+    /// <summary>Server receive time UTC — always stamped by the API on receipt, TV timestamp is ignored.</summary>
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>Idempotency key — TV alert ID or unique hash to prevent duplicate execution. Optional.</summary>
     public string? IdempotencyKey { get; init; }

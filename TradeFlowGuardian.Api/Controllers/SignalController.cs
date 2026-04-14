@@ -36,6 +36,8 @@ public class SignalController(ISignalQueue queue, ILogger<SignalController> logg
         [FromBody] TradeSignal signal,
         CancellationToken ct)
     {
+        signal.Timestamp = DateTimeOffset.UtcNow;
+
         logger.LogInformation(
             "Signal received: {Direction} {Instrument} @ {Price} | ATR={Atr} | Key={Key}",
             signal.Direction, signal.Instrument, signal.Price, signal.Atr, signal.IdempotencyKey);
