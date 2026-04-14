@@ -8,8 +8,8 @@
 # Dockerfile copies sibling projects Core, Infrastructure, Domain, and Strategies.
 
 [build]
-dockerfilePath = "Dockerfile"
-buildContext = ".."
+dockerfilePath = "TradeFlowGuardian.Worker/Dockerfile"
+buildContext = "."
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
