@@ -11,18 +11,25 @@ public class SignalController(ISignalQueue queue, ILogger<SignalController> logg
     /// <summary>
     /// Receives TradingView webhook alert and queues it for execution.
     ///
-    /// TV Alert Message JSON template:
+    /// TV Alert Message JSON template (Pine Script — pre-calculated SL/TP):
+    /// {
+    ///   "instrument": "USD_JPY",
+    ///   "direction": "Long",
+    ///   "atr": 0.245,
+    ///   "stopLoss": 148.750,
+    ///   "takeProfit": 151.200
+    /// }
+    ///
+    /// Legacy template (server-side SL/TP calculation from ATR — requires price):
     /// {
     ///   "instrument": "USD_JPY",
     ///   "direction": "Long",
     ///   "atr": {{plot("ATR")}},
-    ///   "price": {{close}},
-    ///   "riskPercent": 0,
-    ///   "timestamp": "{{timenow}}",
-    ///   "idempotencyKey": "{{exchange}}_{{ticker}}_{{time}}"
+    ///   "price": {{close}}
     /// }
     /// </summary>
     [HttpPost]
+    [Consumes("application/json", "text/plain")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ReceiveSignal(

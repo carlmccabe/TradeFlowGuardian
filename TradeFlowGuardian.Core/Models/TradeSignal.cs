@@ -16,15 +16,21 @@ public class TradeSignal
     /// <summary>ATR value at signal time — used to validate filter server-side</summary>
     public decimal Atr { get; init; }
 
-    /// <summary>Price at signal bar close</summary>
+    /// <summary>Price at signal bar close — optional when StopLoss/TakeProfit are supplied directly</summary>
     public decimal Price { get; init; }
 
     /// <summary>Risk % override — leave 0 to use server config default</summary>
     public decimal RiskPercent { get; init; }
 
-    /// <summary>TV alert timestamp UTC — signals older than 60s are rejected</summary>
+    /// <summary>Pre-calculated stop loss price from Pine Script — skips server-side ATR SL calculation when > 0</summary>
+    public decimal StopLoss { get; init; }
+
+    /// <summary>Pre-calculated take profit price from Pine Script — skips server-side ATR TP calculation when > 0</summary>
+    public decimal TakeProfit { get; init; }
+
+    /// <summary>TV alert timestamp UTC — signals older than 60s are rejected. Defaults to server receive time when omitted.</summary>
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 
-    /// <summary>Idempotency key — TV alert ID or unique hash to prevent duplicate execution</summary>
+    /// <summary>Idempotency key — TV alert ID or unique hash to prevent duplicate execution. Optional.</summary>
     public string? IdempotencyKey { get; init; }
 }

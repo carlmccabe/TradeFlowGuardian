@@ -180,50 +180,60 @@ public class SignalExecutionHandler(
             return;
         }
 
-        // ── SL / TP calculation ───────────────────────────────────────────────
-        var stopDistance   = signal.Atr * _risk.AtrStopMultiplier;
-        var targetDistance = signal.Atr * _risk.AtrTargetMultiplier;
-
-        var isJpy = signal.Instrument.Contains("JPY");
+        // ── SL / TP ───────────────────────────────────────────────────────────
+        var isJpy    = signal.Instrument.Contains("JPY");
         var priceFmt = isJpy ? "F3" : "F5";
 
         decimal stopLoss, takeProfit;
-        if (signal.Direction == SignalDirection.Long)
+        if (signal.StopLoss > 0 && signal.TakeProfit > 0)
         {
-            stopLoss   = signal.Price - stopDistance;
-            takeProfit = signal.Price + targetDistance;
+            // Use pre-calculated SL/TP sent directly from Pine Script
+            stopLoss   = signal.StopLoss;
+            takeProfit = signal.TakeProfit;
         }
         else
         {
-            stopLoss   = signal.Price + stopDistance;
-            takeProfit = signal.Price - targetDistance;
+            // Fall back to server-side ATR-based calculation (requires signal.Price)
+            var stopDistance   = signal.Atr * _risk.AtrStopMultiplier;
+            var targetDistance = signal.Atr * _risk.AtrTargetMultiplier;
+
+            if (signal.Direction == SignalDirection.Long)
+            {
+                stopLoss   = signal.Price - stopDistance;
+                takeProfit = signal.Price + targetDistance;
+            }
+            else
+            {
+                stopLoss   = signal.Price + stopDistance;
+                takeProfit = signal.Price - targetDistance;
+            }
         }
 
         // ── SL/TP Sanity Check ────────────────────────────────────────────────
-        if (takeProfit <= 0 || stopLoss <= 0)
+        if (stopLoss <= 0 || takeProfit <= 0)
         {
-            logger.LogError("Aborting signal for {Instrument}: Invalid SL/TP calculated (SL={SL}, TP={TP}). Check ATR ({Atr})",
+            logger.LogError("Aborting signal for {Instrument}: Invalid SL/TP (SL={SL}, TP={TP}). Check ATR ({Atr}) and signal values.",
                 signal.Instrument, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt), signal.Atr);
             return;
         }
 
-        if (signal.Direction == SignalDirection.Long && takeProfit <= signal.Price)
+        if (signal.Direction == SignalDirection.Long && takeProfit <= stopLoss)
         {
-            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not above entry price ({Price}) for LONG",
-                signal.Instrument, takeProfit.ToString(priceFmt), signal.Price.ToString(priceFmt));
+            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not above SL ({SL}) for LONG",
+                signal.Instrument, takeProfit.ToString(priceFmt), stopLoss.ToString(priceFmt));
             return;
         }
 
-        if (signal.Direction == SignalDirection.Short && takeProfit >= signal.Price)
+        if (signal.Direction == SignalDirection.Short && takeProfit >= stopLoss)
         {
-            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not below entry price ({Price}) for SHORT",
-                signal.Instrument, takeProfit.ToString(priceFmt), signal.Price.ToString(priceFmt));
+            logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not below SL ({SL}) for SHORT",
+                signal.Instrument, takeProfit.ToString(priceFmt), stopLoss.ToString(priceFmt));
             return;
         }
 
         logger.LogInformation(
-            "Executing {Direction} order for {Instrument} | Units={Units} | AccountBalance={Balance:C} | Entry={Price} | SL={SL} (dist: {StopDist}) | TP={TP} (dist: {TargetDist})",
-            signal.Direction, signal.Instrument, units, balance, signal.Price, stopLoss.ToString(priceFmt), stopDistance.ToString(priceFmt), takeProfit.ToString(priceFmt), targetDistance.ToString(priceFmt));
+            "Executing {Direction} order for {Instrument} | Units={Units} | AccountBalance={Balance:C} | SL={SL} | TP={TP}",
+            signal.Direction, signal.Instrument, units, balance, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
 
         // ── Place order ───────────────────────────────────────────────────────
         // CancellationToken.None for both calls: once we decide to trade, we must

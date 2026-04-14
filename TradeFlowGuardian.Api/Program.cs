@@ -91,7 +91,11 @@ builder.Services.AddBacktestServices(builder.Configuration);
 builder.Services.Configure<HostOptions>(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(30));
 
 // ── API ───────────────────────────────────────────────────────────────────────
-builder.Services.AddControllers()
+builder.Services.AddControllers(opts =>
+    {
+        // TradingView sends JSON with Content-Type: text/plain — accept and deserialize it.
+        opts.InputFormatters.Insert(0, new TradeFlowGuardian.Api.Formatters.TextPlainJsonInputFormatter());
+    })
     .AddJsonOptions(opts =>
         opts.JsonSerializerOptions.Converters.Add(
             new System.Text.Json.Serialization.JsonStringEnumConverter()));
