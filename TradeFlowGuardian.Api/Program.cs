@@ -142,6 +142,19 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("Dashboard");
 app.UseHttpMetrics();   // records http_request_duration_seconds for all routes
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/signal") 
+        && context.Request.Method == "POST")
+    {
+        context.Request.EnableBuffering();
+        var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
+        context.Request.Body.Position = 0;
+        var log = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        log.LogInformation("Webhook raw body: {Body}", body);
+    }
+    await next();
+});
 app.UseMiddleware<HmacValidationMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
