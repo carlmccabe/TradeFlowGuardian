@@ -32,11 +32,13 @@ if (builder.Environment.IsDevelopment())
 }
 else
 {
-    builder.Logging.AddSimpleConsole(opts =>
+    // JSON console: Railway parses structured fields, exceptions land in full with
+    // stack traces, and each entry stays one line in the log stream.
+    builder.Logging.AddJsonConsole(opts =>
     {
-        opts.SingleLine = true;
-        opts.TimestampFormat = "HH:mm:ss ";
         opts.IncludeScopes = true;
+        opts.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+        opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions { Indented = false };
     });
 }
 
