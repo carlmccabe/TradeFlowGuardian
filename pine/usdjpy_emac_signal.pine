@@ -1,0 +1,98 @@
+//@version=5
+// TradeFlow Guardian — USD/JPY EMA Crossover Signal
+//
+// Sends structured JSON webhooks to the TradeFlow Guardian API using alert()
+// so that Pine Script runtime values (ATR, SL, TP) are embedded directly in
+// the payload.  The TradingView alert message box MUST be left blank — any
+// text there overrides this payload and breaks field mapping.
+//
+// Payload field names match TradeSignal C# model (camelCase JSON):
+//   instrument, direction, price, atr, stopLoss, takeProfit, riskPercent, idempotencyKey
+//
+// When stopLoss and takeProfit are > 0 the Worker uses them directly and
+// skips server-side ATR re-calculation, so the values here are authoritative.
+//
+// Risk multipliers match CLAUDE.md USD_JPY settings:
+//   AtrStop   = 2.6×
+//   AtrTarget = 5.3×
+
+indicator("TradeFlow Guardian — USD/JPY", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var string INSTRUMENT = "USD_JPY"
+
+emaFastLen = input.int(9,    "Fast EMA Length", minval=1)
+emaSlowLen = input.int(21,   "Slow EMA Length", minval=1)
+atrLen     = input.int(14,   "ATR Length",      minval=1)
+atrStopMul = input.float(2.6, "ATR Stop ×",     minval=0.1, step=0.1)
+atrTgtMul  = input.float(5.3, "ATR Target ×",   minval=0.1, step=0.1)
+
+// ── Indicators ────────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+atr     = ta.atr(atrLen)
+
+plot(emaFast, "EMA Fast", color.new(color.blue,  0), 1)
+plot(emaSlow, "EMA Slow", color.new(color.orange, 0), 1)
+
+// ── Signal detection ──────────────────────────────────────────────────────────
+longEntry  = ta.crossover(emaFast,  emaSlow)   // fast crosses above slow → long
+shortEntry = ta.crossunder(emaFast, emaSlow)   // fast crosses below slow → short
+
+// ── Pre-calculated SL / TP ────────────────────────────────────────────────────
+// Calculated at bar close so values are final — no look-ahead.
+longSL  = close - atr * atrStopMul
+longTP  = close + atr * atrTgtMul
+shortSL = close + atr * atrStopMul
+shortTP = close - atr * atrTgtMul
+
+// ── Idempotency key ───────────────────────────────────────────────────────────
+// Unix timestamp (ms) of bar open — unique per bar, stable at bar close.
+iKey = INSTRUMENT + "_" + str.tostring(time)
+
+// ── Alert payloads ────────────────────────────────────────────────────────────
+// IMPORTANT: Leave the TradingView alert message box BLANK (or "{}").
+// The alert() calls below provide the full JSON body; anything typed in the
+// TV message box will replace this payload and break the field mapping.
+//
+// alert.freq_once_per_bar_close fires after bar close when all indicator
+// values are final.  Multiple alert() calls on the same bar fire in order
+// of declaration: Close fires before the opposing-direction entry, so the
+// server clears the position before attempting the new entry.
+
+// ── Close (exit any open position) ───────────────────────────────────────────
+// Fires on every direction change so the server can close the prior leg.
+// If no position is open the OANDA close call is a no-op and the trade
+// history record is written with success=false (which is expected).
+if longEntry or shortEntry
+    alert(str.format(
+        '{{"instrument":"{0}","direction":"Close","price":{1},"atr":{2},"stopLoss":0,"takeProfit":0,"riskPercent":0,"idempotencyKey":"{3}_C"}}',
+        INSTRUMENT,
+        str.tostring(close, "0.#####"),
+        str.tostring(atr,   "0.#####"),
+        iKey
+    ), alert.freq_once_per_bar_close)
+
+// ── Long entry ────────────────────────────────────────────────────────────────
+if longEntry
+    alert(str.format(
+        '{{"instrument":"{0}","direction":"Long","price":{1},"atr":{2},"stopLoss":{3},"takeProfit":{4},"riskPercent":0,"idempotencyKey":"{5}_L"}}',
+        INSTRUMENT,
+        str.tostring(close,  "0.#####"),
+        str.tostring(atr,    "0.#####"),
+        str.tostring(longSL, "0.#####"),
+        str.tostring(longTP, "0.#####"),
+        iKey
+    ), alert.freq_once_per_bar_close)
+
+// ── Short entry ───────────────────────────────────────────────────────────────
+if shortEntry
+    alert(str.format(
+        '{{"instrument":"{0}","direction":"Short","price":{1},"atr":{2},"stopLoss":{3},"takeProfit":{4},"riskPercent":0,"idempotencyKey":"{5}_S"}}',
+        INSTRUMENT,
+        str.tostring(close,   "0.#####"),
+        str.tostring(atr,     "0.#####"),
+        str.tostring(shortSL, "0.#####"),
+        str.tostring(shortTP, "0.#####"),
+        iKey
+    ), alert.freq_once_per_bar_close)
