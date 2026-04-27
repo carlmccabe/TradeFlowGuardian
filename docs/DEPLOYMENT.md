@@ -162,19 +162,33 @@ curl https://<your-api-url>/api/status/db
    ```
    Where `<your-secret>` matches `Webhook__Secret` in Railway.
 
-3. Alert message body (JSON):
+3. Alert message body: **leave blank** (or set to `{}`).
+
+   The Pine Script in `pine/usdjpy_emac_signal.pine` uses `alert()` calls with
+   `str.format()` to embed runtime values (ATR, calculated SL/TP, entry price)
+   directly in the JSON payload. Anything typed in the TV message box overrides
+   the `alert()` payload and breaks field mapping — the message box can only
+   interpolate built-in TV placeholders like `{{close}}`, not custom Pine Script
+   variables.
+
+   Example payload sent by the Pine Script `alert()` call:
    ```json
    {
      "instrument": "USD_JPY",
-     "direction": "{{strategy.order.action}}",
-     "atr": {{plot("ATR")}},
-     "price": {{close}},
+     "direction": "Long",
+     "price": 149.523,
+     "atr": 0.245,
+     "stopLoss": 148.886,
+     "takeProfit": 150.821,
      "riskPercent": 0,
-     "timestamp": "{{timenow}}",
-     "idempotencyKey": "{{exchange}}_{{ticker}}_{{time}}"
+     "idempotencyKey": "USD_JPY_1744329600000_L"
    }
    ```
    Direction values: `Long` | `Short` | `Close`
+
+   When `stopLoss` and `takeProfit` are both `> 0` the Worker uses them
+   directly and skips server-side ATR re-calculation. `price` and `atr` are
+   still included for logging and ATR spike filter evaluation.
 
 ---
 

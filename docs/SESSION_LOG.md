@@ -179,6 +179,24 @@
 - Build clean: 0 errors, 2 pre-existing warnings
 - **Pending:** run `002_backtest_tables.sql` against PostgreSQL before first backtest call
 
+### 2026-04-27 — Pine Script signal payload fix
+- Root cause: TV alert message box used `"atr": {{close}}` — maps bar close price (~159.497)
+  into the ATR field; Worker saw Price=0, Atr=159.497 and aborted on the ATR-based SL/TP
+  guard (requires Price > 0 when StopLoss/TakeProfit are not pre-supplied)
+- TV message box can only interpolate built-in placeholders (`{{close}}`, `{{open}}` etc.),
+  not custom Pine Script variables — so ATR, SL, TP can never be sent correctly that way
+- Fix: created `pine/usdjpy_emac_signal.pine` — uses `alert()` + `str.format()` to embed
+  runtime values (close, atr, longSL/longTP, shortSL/shortTP) directly in the JSON body
+- Payload now includes all fields the C# `TradeSignal` model expects:
+  `instrument`, `direction`, `price`, `atr`, `stopLoss`, `takeProfit`, `riskPercent`, `idempotencyKey`
+- Pre-calculated SL/TP path in `SignalExecutionHandler` (line 192-199) is taken — server skips
+  ATR re-calculation, Price=0 guard is irrelevant; both SL and TP are authoritative from Pine
+- Close signal fires before the opposing-direction entry on EMA flip bars (declaration order
+  preserved by `alert.freq_once_per_bar_close`) so server clears position before new entry
+- `docs/DEPLOYMENT.md` "Alert message body" section updated — instructs blank message box,
+  shows example payload, explains why `alert()` must own the body
+- No changes to C# execution logic, risk calculations, or field definitions
+
 ### Next session goals
 - Run `docs/migrations/001_trade_history.sql` and `002_backtest_tables.sql` against Railway Postgres
 - Set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
