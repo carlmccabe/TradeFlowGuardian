@@ -118,18 +118,59 @@ public class OandaClient : IOandaClient
 
     /// <summary>
     /// Close all open units for an instrument.
+    /// Queries the current position first to determine which sides are open.
+    /// OANDA returns HTTP 400 if longUnits="ALL" or shortUnits="ALL" is sent for
+    /// a side with no open units — so we must use "NONE" for the empty side.
     /// </summary>
     public async Task<TradeResult> ClosePositionAsync(string instrument, CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/positions/{instrument}/close";
-        var body = new { longUnits = "ALL", shortUnits = "ALL" };
-        var content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
-
         _logger.LogInformation("Closing position: {Instrument}", instrument);
+
+        // Determine which sides are open before sending the close request.
+        var longUnits  = "NONE";
+        var shortUnits = "NONE";
 
         try
         {
-            var response = await _http.PutAsync(url, content, ct);
+            var posUrl      = $"/v3/accounts/{_config.AccountId}/positions/{instrument}";
+            var posResponse = await _http.GetAsync(posUrl, ct);
+
+            if (posResponse.IsSuccessStatusCode)
+            {
+                var posBody  = await posResponse.Content.ReadAsStringAsync(ct);
+                var posNode  = JsonNode.Parse(posBody);
+                var longPos  = decimal.Parse(posNode?["position"]?["long"]?["units"]?.ToString()  ?? "0");
+                var shortPos = decimal.Parse(posNode?["position"]?["short"]?["units"]?.ToString() ?? "0");
+                if (longPos  != 0) longUnits  = "ALL";
+                if (shortPos != 0) shortUnits = "ALL";
+            }
+            else
+            {
+                // Position query failed — fall back to closing both sides.
+                (longUnits, shortUnits) = ("ALL", "ALL");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to query position before close for {Instrument} — will attempt to close both sides",
+                instrument);
+            (longUnits, shortUnits) = ("ALL", "ALL");
+        }
+
+        if (longUnits == "NONE" && shortUnits == "NONE")
+        {
+            _logger.LogInformation("No open position found for {Instrument} — nothing to close", instrument);
+            return TradeResult.Succeeded("no-position", 0, 0, 0, 0);
+        }
+
+        var url     = $"/v3/accounts/{_config.AccountId}/positions/{instrument}/close";
+        var body    = new { longUnits, shortUnits };
+        var content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
+
+        try
+        {
+            var response     = await _http.PutAsync(url, content, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
@@ -138,14 +179,19 @@ public class OandaClient : IOandaClient
                 return TradeResult.Failed($"Close failed {response.StatusCode}: {responseBody}");
             }
 
+            var node      = JsonNode.Parse(responseBody);
+            var fillNode  = node?["longOrderFillTransaction"] ?? node?["shortOrderFillTransaction"];
+            var fillPrice = decimal.TryParse(fillNode?["price"]?.ToString(), out var fp) ? fp : 0m;
+            var orderId   = fillNode?["id"]?.ToString() ?? "close";
+
             return new TradeResult
             {
-                Success = true,
-                OrderId = "close",
-                Message = "Position closed",
-                FillPrice = 0,
-                Units = 0,
-                StopLoss = 0,
+                Success    = true,
+                OrderId    = orderId,
+                Message    = "Position closed",
+                FillPrice  = fillPrice,
+                Units      = 0,
+                StopLoss   = 0,
                 TakeProfit = 0
             };
         }
