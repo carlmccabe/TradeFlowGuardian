@@ -197,9 +197,25 @@
   shows example payload, explains why `alert()` must own the body
 - No changes to C# execution logic, risk calculations, or field definitions
 
+### 2026-05-06 — Staging environment setup
+- Created `develop` branch from `main` as the staging deployment source
+- Updated `docs/DEPLOYMENT.md`:
+  - Platform diagram now shows both environments with isolated plugins
+  - New "Environments & Branching" section covering:
+    - `main` → production, `develop` → staging branch mapping
+    - Step-by-step Railway dashboard instructions to set branch per service per environment
+    - Service isolation verification steps (Redis + Postgres hostname check)
+    - Per-environment env var diff table (ASPNETCORE_ENVIRONMENT, ENVIRONMENT, Webhook__Secret, connection strings)
+    - Staging → production promotion workflow (PR `develop` → `main`)
+    - Per-environment migration instructions via Railway CLI
+  - Added `ENVIRONMENT=production/staging` plain tag var to both service env var tables
+  - Added `ASPNETCORE_ENVIRONMENT`, `DOTNET_ENVIRONMENT`, `ENVIRONMENT` rows to complete reference table
+- `railway.toml` files intentionally not changed — branch selection is a Railway dashboard setting only
+
 ### Next session goals
-- Run `docs/migrations/001_trade_history.sql` and `002_backtest_tables.sql` against Railway Postgres
-- Set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
+- Run `docs/migrations/001_trade_history.sql` and `002_backtest_tables.sql` against Railway Postgres (staging first, then production)
+- Set `Postgres__ConnectionString` in Railway env vars for both Api and Worker in both environments
+- Set `ASPNETCORE_ENVIRONMENT=Staging` / `DOTNET_ENVIRONMENT=Staging` and `ENVIRONMENT=staging` in staging Railway env
 - Add more strategy presets to `StrategyFactory` (ADX-filtered EMAC, RSI mean-reversion)
 - Phase 3 dashboard: backtest results panel (run history, equity curve chart)
 - Phase 3 dashboard: P&L chart (daily/weekly) using trade_history table

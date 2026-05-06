@@ -2,13 +2,121 @@
 
 ## Platform
 
-Railway. Two services, one shared Redis plugin, same GitHub repo.
+Railway. Two environments (production + staging), each with the same service
+topology but fully isolated plugins.
 
 ```
-GitHub repo
-    ├── Api service      (public URL — receives TradingView webhooks)
-    ├── Worker service   (no public URL — consumes Redis Stream, executes trades)
-    └── Redis plugin     (shared by both services)
+GitHub repo (carlmccabe/tradeflowguardian)
+    │
+    ├── main branch   → Railway production environment
+    │       ├── Api service      (public URL — receives TradingView webhooks)
+    │       ├── Worker service   (no public URL — consumes Redis Stream, executes trades)
+    │       ├── Redis plugin     (production only)
+    │       └── PostgreSQL plugin (production only)
+    │
+    └── develop branch → Railway staging environment
+            ├── Api service      (separate public URL)
+            ├── Worker service
+            ├── Redis plugin     (staging only — isolated from production)
+            └── PostgreSQL plugin (staging only — isolated from production)
+```
+
+---
+
+## Environments & Branching
+
+Two Railway environments, each with fully isolated services and plugins:
+
+```
+GitHub branch       Railway environment    OANDA account
+─────────────────   ────────────────────   ─────────────
+main            →   production             fxpractice (or fxtrade for live)
+develop         →   staging                fxpractice only
+```
+
+### Branch → environment mapping (Railway dashboard)
+
+Railway does not read the branch setting from `railway.toml` — it is configured
+per-service in the Railway dashboard. The `railway.toml` files in this repo are
+environment-agnostic (build + deploy settings only).
+
+**Steps to configure staging to watch `develop`:**
+
+1. In Railway dashboard → project → click the environment dropdown (top of page)
+   and select **staging**.
+2. For each service (**Api**, **Worker**, **Dashboard**) in the staging environment:
+   - Click the service → **Settings** tab → **Source** section
+   - Change **Branch** from `main` → `develop`
+   - Click **Save** — Railway will redeploy from `develop` immediately
+3. The **production** environment services should already be set to `main`.
+   Confirm: Settings → Source → Branch = `main` for each service.
+
+### Service isolation
+
+When Railway clones an environment it creates separate plugin instances.
+Staging must **never** share Redis or Postgres with production.
+
+To verify isolation in Railway dashboard:
+- staging environment → Redis plugin → **Connect** — note the hostname
+- production environment → Redis plugin → **Connect** — hostname must differ
+
+If the hostnames are the same the staging environment is sharing production data —
+add a new Redis plugin to the staging environment and update
+`Redis__ConnectionString` in both staging services.
+
+Same check applies to the PostgreSQL plugin.
+
+### Env vars that differ between environments
+
+Set these in the Railway dashboard per environment. All other variables (OANDA
+credentials, risk parameters, filter settings) can be identical if both
+environments target the same OANDA practice account.
+
+| Variable | production | staging | Notes |
+|---|---|---|---|
+| `ASPNETCORE_ENVIRONMENT` | `Production` | `Staging` | Controls .NET config loading; `Staging` shows Swagger UI |
+| `DOTNET_ENVIRONMENT` | `Production` | `Staging` | Worker equivalent of `ASPNETCORE_ENVIRONMENT` |
+| `ENVIRONMENT` | `production` | `staging` | Plain tag — for log filtering and future trade-history tagging |
+| `Webhook__Secret` | prod secret | staging secret | Must differ — prevents staging from accepting production TV alerts |
+| `Redis__ConnectionString` | prod Redis URL | staging Redis URL | From each environment's own Redis plugin |
+| `Postgres__ConnectionString` | prod Postgres URL | staging Postgres URL | From each environment's own Postgres plugin |
+| `Dashboard__Origin` | prod dashboard URL | staging dashboard URL | CORS — update when staging dashboard has its own URL |
+
+Variables that should be **identical** across both environments unless you are
+running separate OANDA accounts:
+
+```
+Oanda__ApiKey
+Oanda__AccountId
+Oanda__Environment      # always fxpractice for staging
+Redis__ConsumerGroup    # workers
+Redis__ConsumerName     # worker-1
+```
+
+### Promoting staging to production
+
+1. Open a pull request on GitHub: **`develop` → `main`**
+2. Review, merge — Railway auto-deploys production from `main`
+3. If any new files exist in `docs/migrations/` that haven't been run against
+   production Postgres, run them now (see "Running the schema migration" below)
+4. Smoke-test production endpoints (health, balance, db status)
+
+Never push directly to `main`. All changes go through `develop` first.
+
+### Running migrations per environment
+
+Each environment's Postgres is independent. Migrations must be run separately:
+
+```bash
+# staging
+railway environment staging
+railway connect PostgreSQL
+# paste docs/migrations/001_trade_history.sql etc.
+
+# production
+railway environment production
+railway connect PostgreSQL
+# paste the same files
 ```
 
 ---
@@ -61,26 +169,28 @@ Railway picks up `TradeFlowGuardian.Worker/railway.toml`:
 
 | Variable | Value | Notes |
 |---|---|---|
-| `ASPNETCORE_ENVIRONMENT` | `Production` | Enables single-line logging, hides Swagger |
+| `ASPNETCORE_ENVIRONMENT` | `Production` (prod) / `Staging` (staging) | Controls .NET config; `Staging` shows Swagger |
+| `ENVIRONMENT` | `production` / `staging` | Plain tag for log filtering |
 | `Oanda__ApiKey` | `<your key>` | Double underscore — .NET config binding |
 | `Oanda__AccountId` | `<your account id>` | |
-| `Oanda__Environment` | `fxpractice` | Change to `fxtrade` for live |
-| `Webhook__Secret` | `<your secret>` | Append `?secret=<value>` to the webhook URL in TradingView |
-| `Redis__ConnectionString` | From Redis plugin | See below |
-| `Postgres__ConnectionString` | From Postgres plugin | See below |
+| `Oanda__Environment` | `fxpractice` | Change to `fxtrade` for live production only |
+| `Webhook__Secret` | `<your secret>` | Append `?secret=<value>` to the webhook URL in TradingView. Use different values per environment. |
+| `Redis__ConnectionString` | From Redis plugin | Must be the environment's own Redis plugin URL |
+| `Postgres__ConnectionString` | From Postgres plugin | Must be the environment's own Postgres plugin URL |
 | `Dashboard__Origin` | `https://<your-dashboard-url>` | CORS — omit if no dashboard yet |
 
 **Worker service:**
 
 | Variable | Value | Notes |
 |---|---|---|
-| `DOTNET_ENVIRONMENT` | `Production` | |
+| `DOTNET_ENVIRONMENT` | `Production` (prod) / `Staging` (staging) | |
+| `ENVIRONMENT` | `production` / `staging` | Plain tag for log filtering |
 | `Oanda__ApiKey` | Same as Api | |
 | `Oanda__AccountId` | Same as Api | |
 | `Oanda__Environment` | `fxpractice` | |
-| `Redis__ConnectionString` | From Redis plugin | Same instance as Api |
+| `Redis__ConnectionString` | From Redis plugin | Same instance as Api, per environment |
 | `Redis__ConsumerName` | `worker-1` | Change if running multiple Worker replicas |
-| `Postgres__ConnectionString` | From Postgres plugin | Same instance as Api |
+| `Postgres__ConnectionString` | From Postgres plugin | Same instance as Api, per environment |
 
 **Getting the Redis connection string:**
 
@@ -216,6 +326,9 @@ required ones will prevent startup if missing.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
+| `ASPNETCORE_ENVIRONMENT` | | `Production` | .NET environment name — use `Staging` in staging environment |
+| `DOTNET_ENVIRONMENT` | | `Production` | Worker equivalent — use `Staging` in staging environment |
+| `ENVIRONMENT` | | — | Plain tag (`production` / `staging`) for log filtering and future trade-history tagging |
 | `Oanda__ApiKey` | ✅ | — | OANDA API key |
 | `Oanda__AccountId` | ✅ | — | OANDA account ID |
 | `Oanda__Environment` | | `fxpractice` | `fxpractice` or `fxtrade` |
