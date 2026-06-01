@@ -28,9 +28,11 @@ public class PositionSizer : IPositionSizer
         var riskPct = signal.RiskPercent > 0 ? signal.RiskPercent : _risk.DefaultRiskPercent;
         var riskAmount = accountBalance * (riskPct / 100m);
 
-        var stopDistance = signal.Atr * _risk.AtrStopMultiplier;
+        // Prefer actual SL distance from the webhook; fall back to ATR × multiplier
+        var stopDistance = (signal.StopLoss > 0 && signal.Price > 0)
+            ? Math.Abs(signal.Price - signal.StopLoss)
+            : signal.Atr * _risk.AtrStopMultiplier;
 
-        // Fetch live quote-to-AUD conversion rate
         var quoteToAud = await GetQuoteToAudAsync(signal.Instrument, ct);
 
         var lossPerUnit = stopDistance * quoteToAud;
@@ -39,7 +41,16 @@ public class PositionSizer : IPositionSizer
             return 0;
 
         var raw = riskAmount / lossPerUnit;
-        var capped = Math.Min(raw, _risk.MaxPositionUnits);
+
+        // Margin cap: no single trade may consume more than 28% of account margin.
+        // OANDA 30:1 → marginRate = 1/30. quoteToAud normalises JPY/USD/EUR → AUD.
+        const decimal marginUtilisationLimit = 0.28m;
+        const decimal marginRate = 1.0m / 30.0m;
+        var marginCap = (signal.Price > 0)
+            ? (accountBalance * marginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
+            : _risk.MaxPositionUnits;
+
+        var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
         return (long)Math.Round(capped);
     }
 

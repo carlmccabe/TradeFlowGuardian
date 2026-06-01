@@ -1,0 +1,144 @@
+//@version=6
+// ============================================================
+// TradeFlow Guardian — USDJPY v5
+// Timeframe : M15  |  Backtesting only — no alerts
+// SMA 9/25  |  EMA 179  |  RSI 18  |  ATR 13
+// SL 2.6×   |  TP 5.3×  |  EMA dist 5–69 pips
+// Session   : 00–09 UTC + 11–12 UTC (skip London open 09–11)
+// ============================================================
+strategy(
+     title              = "TFG — USDJPY v5",
+     shorttitle         = "TFG_USDJPY",
+     overlay            = true,
+     default_qty_type   = strategy.fixed,
+     default_qty_value  = 1,
+     commission_type    = strategy.commission.cash_per_contract,
+     commission_value   = 0,
+     slippage           = 1,
+     pyramiding         = 0,
+     calc_on_every_tick = false
+ )
+
+// ── Sizing ────────────────────────────────────────────────────
+// AUD-native: AUDUSD fetched per bar so sizing tracks exchange
+// rate across the backtest, not a fixed conversion.
+// TV Properties: base currency=AUD, initial capital=AUD balance,
+// margin=3.33%, on every tick=off, on bar close=on.
+i_accountAUD = input.float(188000.0, "Account balance (AUD)", group="Sizing", minval=1000)
+i_riskPct    = input.float(2.2,      "Risk %",                group="Sizing", minval=0.1, step=0.1)
+
+// ── Strategy ──────────────────────────────────────────────────
+i_smaPeriod1 = input.int(9,    "Fast SMA",             group="Strategy", minval=1)
+i_smaPeriod2 = input.int(25,   "Slow SMA",             group="Strategy", minval=1)
+i_emaPeriod  = input.int(179,  "Trend EMA",            group="Strategy", minval=1)
+i_rsiPeriod  = input.int(18,   "RSI period",           group="Strategy", minval=1)
+i_atrPeriod  = input.int(13,   "ATR period",           group="Strategy", minval=1)
+i_slMult     = input.float(2.6, "SL ×ATR",             group="Strategy", minval=0.1, step=0.1)
+i_tpMult     = input.float(5.3, "TP ×ATR",             group="Strategy", minval=0.1, step=0.1)
+i_emaDistMin = input.float(5.0,  "EMA dist min (pips)", group="Strategy", minval=0)
+i_emaDistMax = input.float(69.0, "EMA dist max (pips)", group="Strategy", minval=0)
+
+// ── Session ───────────────────────────────────────────────────
+i_sessionOn   = input.bool(true, "Session filter (00–09 + 11–12 UTC)", group="Session")
+i_showBlocked = input.bool(true, "Show blocked signals",               group="Session")
+
+// ── Display ───────────────────────────────────────────────────
+i_showLabels = input.bool(true, "Show signal labels",  group="Display")
+i_showShade  = input.bool(true, "Shade active session", group="Display")
+
+// ── Indicators ────────────────────────────────────────────────
+// pipSize: hardcoded 0.01 — syminfo.currency check is reliable
+// here but explicit constant avoids any feed-dependent edge cases
+pipSize = syminfo.currency == "JPY" ? 0.01 : 0.0001
+
+sma1    = ta.sma(close, i_smaPeriod1)
+sma2    = ta.sma(close, i_smaPeriod2)
+ema     = ta.ema(close, i_emaPeriod)
+rsi     = ta.rsi(close, i_rsiPeriod)
+atr     = ta.atr(i_atrPeriod)
+emaDist = math.abs(close - ema) / pipSize
+
+// ── Session gate ─────────────────────────────────────────────
+utcHour   = hour(time, "UTC")
+inSession = not i_sessionOn or
+            (utcHour >= 0  and utcHour < 9) or
+            (utcHour >= 11 and utcHour < 12)
+
+// ── Signal conditions ─────────────────────────────────────────
+crossUp   = ta.crossover(sma1, sma2)
+crossDown = ta.crossunder(sma1, sma2)
+atrRising = atr > atr[1]
+distOk    = emaDist >= i_emaDistMin and emaDist <= i_emaDistMax
+
+longOk  = crossUp   and close > ema and rsi > 50 and atrRising and distOk and barstate.isconfirmed
+shortOk = crossDown and close < ema and rsi < 50 and atrRising and distOk and barstate.isconfirmed
+
+longFired  = longOk  and inSession
+shortFired = shortOk and inSession
+
+// ── SL / TP ──────────────────────────────────────────────────
+longSL  = close - i_slMult * atr
+longTP  = close + i_tpMult * atr
+shortSL = close + i_slMult * atr
+shortTP = close - i_tpMult * atr
+
+// ── AUD-native sizing ─────────────────────────────────────────
+// 1. Fetch AUDUSD at bar time — tracks rate across backtest
+// 2. Convert AUD risk → USD
+// 3. Divide by (slPips × pipValuePerLot in USD)
+// 4. Return units (lots × 100,000), minimum 1,000
+f_units(slPips) =>
+    audusd      = request.security("OANDA:AUDUSD", timeframe.period, close)
+    riskUSD     = i_accountAUD * (i_riskPct / 100.0) * audusd
+    pipValPerLot = (pipSize / close) * 100000.0
+    lots        = riskUSD / (slPips * pipValPerLot)
+    math.max(math.round(lots * 100000.0), 1000)
+
+// ── Entries ───────────────────────────────────────────────────
+if longFired
+    strategy.entry("Long", strategy.long, qty=f_units((i_slMult * atr) / pipSize))
+    strategy.exit("LX", "Long", stop=longSL, limit=longTP)
+
+if shortFired
+    strategy.entry("Short", strategy.short, qty=f_units((i_slMult * atr) / pipSize))
+    strategy.exit("SX", "Short", stop=shortSL, limit=shortTP)
+
+// ── Visuals ───────────────────────────────────────────────────
+plot(sma1, "Fast SMA",  color=color.new(color.blue,   0), linewidth=1)
+plot(sma2, "Slow SMA",  color=color.new(color.orange,  0), linewidth=1)
+plot(ema,  "Trend EMA", color=color.new(color.white,   0), linewidth=2)
+
+bgcolor(close > ema ? color.new(color.green, 96) : color.new(color.red, 96))
+bgcolor(i_showShade and inSession ? color.new(color.blue,  93) : na, title="Session")
+bgcolor(longFired                 ? color.new(color.green, 85) : na, title="Long")
+bgcolor(shortFired                ? color.new(color.red,   85) : na, title="Short")
+
+if i_showLabels and longFired
+    label.new(bar_index, low - atr,
+              "▲ LONG\nEntry: " + str.tostring(close,  "#.000") +
+              "\nSL: "          + str.tostring(longSL,  "#.000") +
+              "\nTP: "          + str.tostring(longTP,  "#.000") +
+              "\nATR: "         + str.tostring(atr,     "#.000") +
+              "\nDist: "        + str.tostring(emaDist, "#.0") + " pips",
+              style=label.style_label_up,
+              color=color.lime, textcolor=color.black, size=size.small)
+
+if i_showLabels and shortFired
+    label.new(bar_index, high + atr,
+              "▼ SHORT\nEntry: " + str.tostring(close,   "#.000") +
+              "\nSL: "           + str.tostring(shortSL,  "#.000") +
+              "\nTP: "           + str.tostring(shortTP,  "#.000") +
+              "\nATR: "          + str.tostring(atr,      "#.000") +
+              "\nDist: "         + str.tostring(emaDist,  "#.0") + " pips",
+              style=label.style_label_down,
+              color=color.red, textcolor=color.white, size=size.small)
+
+if i_showBlocked and i_sessionOn and not inSession
+    if longOk
+        label.new(bar_index, low,  "▲ blocked",
+                  color=color.gray, textcolor=color.white,
+                  style=label.style_label_up, size=size.tiny)
+    if shortOk
+        label.new(bar_index, high, "▼ blocked",
+                  color=color.gray, textcolor=color.white,
+                  style=label.style_label_down, size=size.tiny)
