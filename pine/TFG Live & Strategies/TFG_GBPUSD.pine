@@ -60,7 +60,7 @@ emaDist = math.abs(close - ema) / pipSize
 // Surgical block — 3 specific hours only, all others allowed
 utcHour   = hour(time, "UTC")
 inSession = not i_sessionOn or
-            (utcHour != 3 and utcHour != 8 and utcHour != 18)
+             (utcHour != 3 and utcHour != 8 and utcHour != 18)
 
 // ── Signal conditions ─────────────────────────────────────────
 crossUp   = ta.crossover(sma1, sma2)

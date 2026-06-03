@@ -27,7 +27,10 @@ public class PositionSizerTests
             AtrTargetMultiplier  = 4.0m,
             MaxDailyDrawdownPercent = 3.0m
         });
-        return new PositionSizer(risk, oandaMock.Object);
+        var riskRepo = new Mock<IRiskSettingsRepository>();
+        riskRepo.Setup(r => r.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((TradeFlowGuardian.Core.Models.RiskSettings?)null);
+        return new PositionSizer(risk, oandaMock.Object, riskRepo.Object);
     }
 
     private static Mock<IOandaClient> OandaWithAudJpy(decimal audJpy)

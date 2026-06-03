@@ -19,8 +19,10 @@ public class SignalExecutionHandlerTests
     private readonly Mock<IPositionCache> _positionCacheMock = new();
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock = new();
     private readonly Mock<ITradeHistoryRepository> _tradeHistoryMock = new();
+    private readonly Mock<IRiskSettingsRepository> _riskRepoMock = new();
     private readonly Mock<IConnectionMultiplexer> _redisMock = new();
     private readonly Mock<IDatabase> _dbMock = new();
+    private readonly Mock<ISubscriber> _subscriberMock = new();
     private readonly Mock<ILogger<SignalExecutionHandler>> _loggerMock = new();
     private readonly IOptions<RiskConfig> _riskOptions;
 
@@ -38,6 +40,15 @@ public class SignalExecutionHandlerTests
         _redisMock.Setup(x => x.GetDatabase())
             .Returns(_dbMock.Object);
         _redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(_dbMock.Object);
+        _redisMock.Setup(x => x.GetSubscriber(It.IsAny<object>())).Returns(_subscriberMock.Object);
+        _subscriberMock
+            .Setup(x => x.PublishAsync(It.IsAny<RedisChannel>(), It.IsAny<RedisValue>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync(0L);
+
+        // Default: instrument is active (null means no DB row → defaults to allowed)
+        _riskRepoMock
+            .Setup(x => x.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((TradeFlowGuardian.Core.Models.RiskSettings?)null);
 
         // Default: cache miss — falls through to OANDA
         _positionCacheMock
@@ -72,6 +83,7 @@ public class SignalExecutionHandlerTests
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
+            _riskRepoMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -113,6 +125,7 @@ public class SignalExecutionHandlerTests
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
+            _riskRepoMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -177,6 +190,7 @@ public class SignalExecutionHandlerTests
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
+            _riskRepoMock.Object,
             riskOptions,
             _redisMock.Object,
             _loggerMock.Object);
@@ -234,6 +248,7 @@ public class SignalExecutionHandlerTests
             _positionCacheMock.Object,
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
+            _riskRepoMock.Object,
             _riskOptions,
             _redisMock.Object,
             _loggerMock.Object);

@@ -2,10 +2,16 @@
 // ============================================================
 // TradeFlow Guardian — EURUSD v6
 // Timeframe : M30  |  Backtesting only — no alerts
-// SMA 9/22  |  EMA 203  |  RSI 14  |  ATR 14
-// SL 2.4×   |  TP 4.6×  |  EMA dist 24–68 pips
-// Session   : 09–19 UTC (London open through NY — best WR hours)
-//             Pre-07h and post-19h = 0% WR in backtest data
+// SMA 8/22  |  EMA 191  |  RSI 14  |  ATR 14
+// SL 2.4×   |  TP 5.5×  |  EMA dist 25–79 pips
+// Session   : 09–19 UTC (London open through NY afternoon)
+// Day filter : Mon / Fri individually toggleable
+//
+// IMPORTANT: Set TradingView chart timezone to UTC before
+// backtesting so exported CSV timestamps match UTC session gate.
+//
+// TV Properties: base currency=AUD, initial capital=100000,
+// margin=3.33%, on every tick=OFF, on bar close=ON.
 // ============================================================
 strategy(
      title              = "TFG — EURUSD v6",
@@ -25,25 +31,30 @@ i_accountAUD = input.float(100000.0, "Account balance (AUD)", group="Sizing", mi
 i_riskPct    = input.float(1.5,      "Risk %",                group="Sizing", minval=0.1, step=0.1)
 
 // ── Strategy ──────────────────────────────────────────────────
-i_smaPeriod1 = input.int(9,    "Fast SMA",             group="Strategy", minval=1)
+i_smaPeriod1 = input.int(8,    "Fast SMA",             group="Strategy", minval=1)
 i_smaPeriod2 = input.int(22,   "Slow SMA",             group="Strategy", minval=1)
-i_emaPeriod  = input.int(203,  "Trend EMA",            group="Strategy", minval=1)
+i_emaPeriod  = input.int(191,  "Trend EMA",            group="Strategy", minval=1)
 i_rsiPeriod  = input.int(14,   "RSI period",           group="Strategy", minval=1)
 i_atrPeriod  = input.int(14,   "ATR period",           group="Strategy", minval=1)
 i_slMult     = input.float(2.4, "SL ×ATR",             group="Strategy", minval=0.1, step=0.1)
-i_tpMult     = input.float(4.6, "TP ×ATR",             group="Strategy", minval=0.1, step=0.1)
-i_emaDistMin = input.float(24.0, "EMA dist min (pips)", group="Strategy", minval=0)
-i_emaDistMax = input.float(68.0, "EMA dist max (pips)", group="Strategy", minval=0)
+i_tpMult     = input.float(5.5, "TP ×ATR",             group="Strategy", minval=0.1, step=0.1)
+i_emaDistMin = input.float(25.0, "EMA dist min (pips)", group="Strategy", minval=0)
+i_emaDistMax = input.float(79.0, "EMA dist max (pips)", group="Strategy", minval=0)
 
 // ── Session ───────────────────────────────────────────────────
-// 09–19 UTC = London open through NY afternoon
-// Pre-07h and 20h+ = 0% WR across all samples
+// All times in UTC. Chart must be set to UTC for accurate CSV export.
 i_sessionOn   = input.bool(true, "Session filter (09–19 UTC)", group="Session")
 i_showBlocked = input.bool(true, "Show blocked signals",       group="Session")
 
+// ── Day filters ───────────────────────────────────────────────
+// Mon 38.5% WR (n=13) | Fri 37.5% WR (n=8) — lowest in sample
+// Toggle independently to test each in isolation
+i_blockMon    = input.bool(false, "Block Monday signals",  group="Day Filter")
+i_blockFri    = input.bool(false, "Block Friday signals",  group="Day Filter")
+
 // ── Display ───────────────────────────────────────────────────
-i_showLabels = input.bool(true, "Show signal labels",  group="Display")
-i_showShade  = input.bool(true, "Shade active session", group="Display")
+i_showLabels  = input.bool(true, "Show signal labels",  group="Display")
+i_showShade   = input.bool(true, "Shade active session", group="Display")
 
 // ── Indicators ────────────────────────────────────────────────
 pipSize = syminfo.currency == "JPY" ? 0.01 : 0.0001
@@ -55,9 +66,15 @@ rsi     = ta.rsi(close, i_rsiPeriod)
 atr     = ta.atr(i_atrPeriod)
 emaDist = math.abs(close - ema) / pipSize
 
-// ── Session gate ─────────────────────────────────────────────
-utcHour   = hour(time, "UTC")
-inSession = not i_sessionOn or (utcHour >= 9 and utcHour < 19)
+// ── Session gate (UTC) ────────────────────────────────────────
+utcHour = hour(time, "UTC")
+utcDay  = dayofweek(time, "UTC")  // 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
+
+dayOk     = (not i_blockMon or utcDay != 2) and
+             (not i_blockFri or utcDay != 6)
+
+inSession = not i_sessionOn or
+             ((utcHour >= 9 and utcHour < 17) and dayOk)
 
 // ── Signal conditions ─────────────────────────────────────────
 crossUp   = ta.crossover(sma1, sma2)
@@ -78,7 +95,8 @@ shortSL = close + i_slMult * atr
 shortTP = close - i_tpMult * atr
 
 // ── AUD-native sizing ─────────────────────────────────────────
-// EURUSD: USD-quote pair, pip value = $10/pip/lot (fixed)
+// EURUSD: USD-quote, pip value = pipSize × 100,000 (fixed $10/pip/lot)
+// AUDUSD fetched per bar so sizing tracks exchange rate across backtest
 f_units(slPips) =>
     audusd       = request.security("OANDA:AUDUSD", timeframe.period, close)
     riskUSD      = i_accountAUD * (i_riskPct / 100.0) * audusd
@@ -112,8 +130,7 @@ if i_showLabels and longFired
               "\nTP: "          + str.tostring(longTP,  "#.00000") +
               "\nATR: "         + str.tostring(atr,     "#.00000") +
               "\nDist: "        + str.tostring(emaDist, "#.0") + " pips",
-              style=label.style_label_up,
-              color=color.lime, textcolor=color.black, size=size.small)
+              style=label.style_label_up, color=color.lime, textcolor=color.black, size=size.small)
 
 if i_showLabels and shortFired
     label.new(bar_index, high + atr,
@@ -122,15 +139,12 @@ if i_showLabels and shortFired
               "\nTP: "           + str.tostring(shortTP,  "#.00000") +
               "\nATR: "          + str.tostring(atr,      "#.00000") +
               "\nDist: "         + str.tostring(emaDist,  "#.0") + " pips",
-              style=label.style_label_down,
-              color=color.red, textcolor=color.white, size=size.small)
+              style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
 
 if i_showBlocked and i_sessionOn and not inSession
     if longOk
-        label.new(bar_index, low,  "▲ blocked",
-                  color=color.gray, textcolor=color.white,
-                  style=label.style_label_up, size=size.tiny)
+        label.new(bar_index, low,  "▲ blocked", color=color.gray, textcolor=color.white,
+                  style=label.style_label_up,   size=size.tiny)
     if shortOk
-        label.new(bar_index, high, "▼ blocked",
-                  color=color.gray, textcolor=color.white,
+        label.new(bar_index, high, "▼ blocked", color=color.gray, textcolor=color.white,
                   style=label.style_label_down, size=size.tiny)

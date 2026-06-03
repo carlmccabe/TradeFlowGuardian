@@ -89,17 +89,20 @@ public interface IDailyDrawdownGuard
 /// </summary>
 public interface ITradeHistoryRepository
 {
-    /// <summary>
-    /// Inserts a trade record. Called after every PlaceMarketOrderAsync / ClosePositionAsync
-    /// regardless of success or failure.
-    /// </summary>
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
-
-    /// <summary>
-    /// Checks connectivity and returns the total number of rows in trade_history.
-    /// Never throws — returns (false, 0, errorMessage) on any failure.
-    /// </summary>
     Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(int days = 90, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Manages per-instrument risk settings stored in PostgreSQL.
+/// </summary>
+public interface IRiskSettingsRepository
+{
+    Task<RiskSettings?> GetByInstrumentAsync(string instrument, CancellationToken ct = default);
+    Task<IReadOnlyList<RiskSettings>> GetAllAsync(CancellationToken ct = default);
+    Task<RiskSettings> UpsertAsync(string instrument, decimal? riskPercent, bool? isActive, CancellationToken ct = default);
+    Task SetAllActiveAsync(bool isActive, CancellationToken ct = default);
 }
 
 /// <summary>

@@ -16,6 +16,51 @@ public class StatusController(
     IOptions<RiskConfig> risk,
     ILogger<StatusController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Combined status: live balance + all open positions with unrealised P&amp;L.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetStatus(CancellationToken ct)
+    {
+        var balance   = await oanda.GetAccountBalanceAsync(ct);
+        var positions = await oanda.GetAllOpenPositionsAsync(ct);
+        return Ok(new
+        {
+            balanceAud = balance,
+            positions  = positions.Select(p => new
+            {
+                instrument   = p.Instrument,
+                units        = p.Units,
+                unrealizedPL = p.UnrealizedPL,
+                averagePrice = p.AveragePrice,
+                side         = p.Units switch { > 0 => "LONG", < 0 => "SHORT", _ => "FLAT" }
+            }),
+            fetchedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Returns last 90 days of entry+close trade pairs from PostgreSQL.
+    /// ExitPrice and ClosedAt are null for still-open trades.
+    /// P&L figures are in quote currency (no AUD conversion applied here).
+    /// </summary>
+    [HttpGet("trades")]
+    public async Task<IActionResult> GetTrades(CancellationToken ct)
+    {
+        var trades = await tradeHistory.GetPairedTradesAsync(90, ct);
+        return Ok(trades.Select(t => new
+        {
+            instrument      = t.Instrument,
+            direction       = t.Direction,
+            entryPrice      = t.EntryPrice,
+            exitPrice       = t.ExitPrice,
+            units           = t.Units,
+            openedAt        = t.OpenedAt,
+            closedAt        = t.ClosedAt,
+            durationSeconds = t.DurationSeconds
+        }));
+    }
+
     /// <summary>Returns all instruments with an open position.</summary>
     [HttpGet("positions")]
     public async Task<IActionResult> GetPositions(CancellationToken ct)

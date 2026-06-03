@@ -71,6 +71,54 @@ public class TradeHistoryRepository(
         }
     }
 
+    private const string PairedTradesSql = """
+        SELECT
+            e.instrument                                        AS Instrument,
+            e.direction                                         AS Direction,
+            e.fill_price                                        AS EntryPrice,
+            c.fill_price                                        AS ExitPrice,
+            e.units                                             AS Units,
+            e.executed_at                                       AS OpenedAt,
+            c.executed_at                                       AS ClosedAt,
+            EXTRACT(EPOCH FROM (c.executed_at - e.executed_at))::int AS DurationSeconds
+        FROM trade_history e
+        LEFT JOIN LATERAL (
+            SELECT fill_price, executed_at
+            FROM trade_history c2
+            WHERE c2.instrument  = e.instrument
+              AND c2.direction   = 'Close'
+              AND c2.executed_at > e.executed_at
+              AND c2.success     = true
+            ORDER BY c2.executed_at
+            LIMIT 1
+        ) c ON true
+        WHERE e.direction IN ('Long', 'Short')
+          AND e.success    = true
+          AND e.executed_at >= NOW() - (@Days || ' days')::INTERVAL
+        ORDER BY e.executed_at DESC
+        """;
+
+    public async Task<IReadOnlyList<TradeFlowGuardian.Core.Models.PairedTradeRecord>> GetPairedTradesAsync(
+        int days = 90, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            return [];
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(ct);
+            var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.PairedTradeRecord>(
+                PairedTradesSql, new { Days = days });
+            return rows.ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to query paired trade records");
+            return [];
+        }
+    }
+
     private static string NormalizeConnectionString(string connectionString)
     {
         connectionString = connectionString?.Trim() ?? string.Empty;

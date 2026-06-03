@@ -13,11 +13,13 @@ public class PositionSizer : IPositionSizer
 {
     private readonly RiskConfig _risk;
     private readonly IOandaClient _oanda;
+    private readonly IRiskSettingsRepository _riskRepo;
 
-    public PositionSizer(IOptions<RiskConfig> risk, IOandaClient oanda)
+    public PositionSizer(IOptions<RiskConfig> risk, IOandaClient oanda, IRiskSettingsRepository riskRepo)
     {
-        _risk = risk.Value;
-        _oanda = oanda;
+        _risk    = risk.Value;
+        _oanda   = oanda;
+        _riskRepo = riskRepo;
     }
 
     public async Task<long> CalculateUnitsAsync(
@@ -25,7 +27,11 @@ public class PositionSizer : IPositionSizer
         decimal accountBalance,
         CancellationToken ct = default)
     {
-        var riskPct = signal.RiskPercent > 0 ? signal.RiskPercent : _risk.DefaultRiskPercent;
+        // DB lookup takes priority; signal override applies only when explicitly > 0
+        var dbSettings = await _riskRepo.GetByInstrumentAsync(signal.Instrument, ct);
+        var riskPct = signal.RiskPercent > 0
+            ? signal.RiskPercent
+            : dbSettings?.RiskPercent ?? _risk.DefaultRiskPercent;
         var riskAmount = accountBalance * (riskPct / 100m);
 
         // Prefer actual SL distance from the webhook; fall back to ATR × multiplier

@@ -61,8 +61,8 @@ emaDist = math.abs(close - ema) / pipSize
 // ── Session gate ─────────────────────────────────────────────
 utcHour   = hour(time, "UTC")
 inSession = not i_sessionOn or
-            (utcHour >= 0  and utcHour < 9) or
-            (utcHour >= 11 and utcHour < 12)
+             (utcHour >= 0  and utcHour < 9) or
+             (utcHour >= 11 and utcHour < 12)
 
 // ── Signal conditions ─────────────────────────────────────────
 crossUp   = ta.crossover(sma1, sma2)
