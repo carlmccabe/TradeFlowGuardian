@@ -1,5 +1,8 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
+using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 
@@ -14,6 +17,7 @@ public class StatusController(
     IDailyDrawdownGuard drawdownGuard,
     ITradeHistoryRepository tradeHistory,
     IOptions<RiskConfig> risk,
+    IHubContext<TradingHub> hub,
     ILogger<StatusController> logger) : ControllerBase
 {
     /// <summary>
@@ -84,6 +88,11 @@ public class StatusController(
     {
         await pauseState.SetPausedAsync(body.Paused, ct);
         logger.LogWarning("Global pause set to {Paused} via API", body.Paused);
+        await hub.Clients.All.SendAsync("event", JsonSerializer.Serialize(new
+        {
+            type   = "pause_changed",
+            paused = body.Paused
+        }), ct);
         return Ok(new { paused = body.Paused, updatedAt = DateTimeOffset.UtcNow });
     }
 

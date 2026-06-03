@@ -16,8 +16,14 @@ public static class PostgresConnectionHelper
         if (string.IsNullOrEmpty(connectionString))
             return string.Empty;
 
-        if (!connectionString.Contains("://", StringComparison.Ordinal))
+        // Already in Npgsql key=value format (Host=...) — pass through as-is.
+        if (connectionString.StartsWith("Host=", StringComparison.OrdinalIgnoreCase) ||
+            connectionString.Contains(";Host=", StringComparison.OrdinalIgnoreCase))
             return connectionString;
+
+        // Not a URI and not key=value — invalid; return empty so the caller falls back to NoOp.
+        if (!connectionString.Contains("://", StringComparison.Ordinal))
+            return string.Empty;
 
         if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
             return string.Empty;

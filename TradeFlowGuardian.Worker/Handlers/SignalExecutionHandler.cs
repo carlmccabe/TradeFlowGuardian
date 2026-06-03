@@ -189,6 +189,7 @@ public class SignalExecutionHandler(
                 "Aborting signal for {Instrument}: daily drawdown limit breached (confirmed at balance fetch).",
                 signal.Instrument);
             TradeMetrics.SignalsFiltered.WithLabels("daily_drawdown").Inc();
+            await PublishEventAsync(new { type = "drawdown_breached", balance });
             return;
         }
 

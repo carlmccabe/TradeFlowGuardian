@@ -12,7 +12,7 @@ export function GuardTab() {
   const { data: riskData, refresh: refreshRisk } = usePolling(fetchRisk, 10_000)
 
   const fetchFilters = useCallback(() => api.getFilterStatus(), [])
-  const { data: filters } = usePolling(fetchFilters, 10_000)
+  const { data: filters, refresh: refreshFilters } = usePolling(fetchFilters, 10_000)
 
   const [pauseAllBusy, setPauseAllBusy] = useState(false)
 
@@ -29,6 +29,9 @@ export function GuardTab() {
   useSignalR(async (event: TradingEvent) => {
     if (event.type === 'order_filled' || event.type === 'position_closed') {
       await refreshStatus()
+    }
+    if (event.type === 'pause_changed' || event.type === 'drawdown_breached') {
+      await refreshFilters()
     }
     if (event.type === 'risk_updated') {
       setRiskSettings(prev => {

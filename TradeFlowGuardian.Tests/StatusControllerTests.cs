@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using TradeFlowGuardian.Api.Controllers;
+using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
@@ -16,6 +18,7 @@ public class StatusControllerTests
     private readonly Mock<IPauseState> _pauseStateMock;
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock;
     private readonly Mock<ITradeHistoryRepository> _tradeHistoryMock;
+    private readonly Mock<IHubContext<TradingHub>> _hubMock;
     private readonly Mock<ILogger<StatusController>> _loggerMock;
     private readonly StatusController _controller;
 
@@ -26,6 +29,15 @@ public class StatusControllerTests
         _drawdownGuardMock = new Mock<IDailyDrawdownGuard>();
         _tradeHistoryMock = new Mock<ITradeHistoryRepository>();
         _loggerMock = new Mock<ILogger<StatusController>>();
+        _hubMock = new Mock<IHubContext<TradingHub>>();
+
+        var clientsMock = new Mock<IHubClients>();
+        var clientProxyMock = new Mock<IClientProxy>();
+        _hubMock.Setup(h => h.Clients).Returns(clientsMock.Object);
+        clientsMock.Setup(c => c.All).Returns(clientProxyMock.Object);
+        clientProxyMock
+            .Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         // Default: DB reachable with 0 rows
         _tradeHistoryMock
@@ -39,6 +51,7 @@ public class StatusControllerTests
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
             riskOptions,
+            _hubMock.Object,
             _loggerMock.Object);
     }
 

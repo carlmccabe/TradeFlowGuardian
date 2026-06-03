@@ -3,7 +3,7 @@ import { api, type RiskSettingsResponse, type PositionResponse } from '../api/cl
 
 const RISK_MIN = 0.5
 const RISK_MAX = 3.0
-const RISK_STEP = 0.5
+const RISK_STEP = 0.1
 
 interface Props {
   settings: RiskSettingsResponse
