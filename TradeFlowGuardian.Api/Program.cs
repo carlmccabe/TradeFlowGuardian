@@ -91,7 +91,15 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
 
 // ── Risk settings (EF / PostgreSQL) ──────────────────────────────────────────
 {
-    var pgCs = PostgresConnectionHelper.Normalize(builder.Configuration["Postgres:ConnectionString"]);
+    var rawPgCs  = builder.Configuration["Postgres:ConnectionString"];
+    var pgCs     = PostgresConnectionHelper.Normalize(rawPgCs);
+    var earlyLog = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
+    earlyLog.LogInformation(
+        "RiskSettings DB config | raw_starts_with={RawPrefix} normalized_starts_with={NormPrefix} using_noop={NoOp}",
+        rawPgCs?[..Math.Min(12, rawPgCs.Length)] ?? "(null)",
+        pgCs.Length > 0 ? pgCs[..Math.Min(12, pgCs.Length)] : "(empty)",
+        string.IsNullOrWhiteSpace(pgCs));
+
     if (!string.IsNullOrWhiteSpace(pgCs))
     {
         builder.Services.AddDbContext<TradeFlowDbContext>(opts =>
