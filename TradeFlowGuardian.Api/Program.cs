@@ -1,18 +1,23 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Prometheus;
 using StackExchange.Redis;
+using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Api.Middleware;
+using TradeFlowGuardian.Api.Services;
 using TradeFlowGuardian.Backtesting;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Calendar;
+using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.History;
 using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
+using TradeFlowGuardian.Infrastructure.Risk;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -83,6 +88,25 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
         sp.GetRequiredService<SignalAgeFilter>(),
         sp.GetRequiredService<AtrSpikeFilter>()
     }));
+
+// ── Risk settings (EF / PostgreSQL) ──────────────────────────────────────────
+{
+    var pgCs = builder.Configuration["Postgres:ConnectionString"] ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(pgCs))
+    {
+        builder.Services.AddDbContext<TradeFlowDbContext>(opts =>
+            opts.UseNpgsql(pgCs));
+        builder.Services.AddScoped<IRiskSettingsRepository, RiskSettingsRepository>();
+    }
+    else
+    {
+        builder.Services.AddScoped<IRiskSettingsRepository, NoOpRiskSettingsRepository>();
+    }
+}
+
+// ── SignalR ───────────────────────────────────────────────────────────────────
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<RedisEventSubscriberService>();
 
 // ── Backtest engine ───────────────────────────────────────────────────────────
 builder.Services.AddBacktestServices(builder.Configuration);
@@ -158,6 +182,7 @@ app.Use(async (context, next) =>
 app.UseMiddleware<HmacValidationMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<TradingHub>("/hubs/trading");
 // TODO: restrict to private network when Railway private networking is configured
 app.MapMetrics();       // exposes /metrics for Prometheus scraping (no auth — internal network only)
 app.MapGet("/", () => Results.Ok(new

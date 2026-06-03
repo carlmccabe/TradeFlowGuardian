@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
 using TradeFlowGuardian.Core.Interfaces;
@@ -24,12 +25,14 @@ public class SignalExecutionHandler(
     IPositionCache positionCache,
     IDailyDrawdownGuard drawdownGuard,
     ITradeHistoryRepository tradeHistory,
+    IRiskSettingsRepository riskRepo,
     IOptions<RiskConfig> risk,
     IConnectionMultiplexer redis,
     ILogger<SignalExecutionHandler> logger)
 {
     private readonly RiskConfig _risk = risk.Value;
     private readonly IDatabase _db = redis.GetDatabase();
+    private const string EventsChannel = "tradeflow:events";
 
     public async Task HandleAsync(TradeSignal signal, CancellationToken ct)
     {
@@ -107,6 +110,14 @@ public class SignalExecutionHandler(
                 await positionCache.ClearAsync(signal.Instrument, CancellationToken.None);
                 logger.LogInformation("Successfully closed position for {Instrument}: {Message}",
                     signal.Instrument, closeResult.Message);
+                await PublishEventAsync(new
+                {
+                    type       = "position_closed",
+                    instrument = signal.Instrument,
+                    exitPrice  = closeResult.FillPrice,
+                    orderId    = closeResult.OrderId,
+                    status     = "closed"
+                });
             }
             else
             {
@@ -123,6 +134,15 @@ public class SignalExecutionHandler(
             logger.LogWarning("Signal for {Instrument} blocked by filter. Reason: {Reason}",
                 signal.Instrument, filterResult.Reason);
             TradeMetrics.SignalsFiltered.WithLabels(filterResult.Label).Inc();
+            return;
+        }
+
+        // ── IsActive check — DB risk settings ────────────────────────────────
+        var riskSettings = await riskRepo.GetByInstrumentAsync(signal.Instrument, ct);
+        if (riskSettings is { IsActive: false })
+        {
+            logger.LogWarning("Signal for {Instrument} blocked: instrument is inactive in risk settings", signal.Instrument);
+            TradeMetrics.SignalsFiltered.WithLabels("instrument_inactive").Inc();
             return;
         }
 
@@ -288,12 +308,38 @@ public class SignalExecutionHandler(
             logger.LogInformation(
                 "Order filled successfully for {Instrument}: ID={OrderId} @ {FillPrice} | Units={Units} | SL={SL} TP={TP}",
                 signal.Instrument, result.OrderId, result.FillPrice, result.Units, result.StopLoss, result.TakeProfit);
+            await PublishEventAsync(new
+            {
+                type         = "order_filled",
+                instrument   = signal.Instrument,
+                direction    = signal.Direction.ToString(),
+                units        = result.Units ?? units,
+                entryPrice   = result.FillPrice,
+                stopLoss,
+                takeProfit,
+                orderId      = result.OrderId,
+                unrealisedPnl = 0m,
+                status       = "open"
+            });
         }
         else
         {
             TradeMetrics.OrdersPlaced.WithLabels("failed").Inc();
             logger.LogError("Order failed for {Instrument}: {Message} | Entry={Price} | SL={SL} | TP={TP}",
                 signal.Instrument, result.Message, signal.Price.ToString(priceFmt), stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
+        }
+    }
+
+    private async Task PublishEventAsync(object payload)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(payload);
+            await redis.GetSubscriber().PublishAsync(RedisChannel.Literal(EventsChannel), json);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to publish trade event to Redis");
         }
     }
 }

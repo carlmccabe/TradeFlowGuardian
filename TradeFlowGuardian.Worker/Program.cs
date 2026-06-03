@@ -1,9 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Calendar;
+using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Cache;
@@ -11,6 +13,7 @@ using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.History;
 using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Queue;
+using TradeFlowGuardian.Infrastructure.Risk;
 using TradeFlowGuardian.Worker;
 using TradeFlowGuardian.Worker.Handlers;
 
@@ -64,6 +67,23 @@ builder.Services.AddSingleton<IPauseState, RedisPauseState>();
 builder.Services.AddSingleton<IDailyDrawdownGuard, DailyDrawdownGuard>();
 builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
+
+// ── Risk settings (EF / PostgreSQL) ──────────────────────────────────────────
+{
+    var pgCs = builder.Configuration["Postgres:ConnectionString"] ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(pgCs))
+    {
+        builder.Services.AddDbContext<TradeFlowDbContext>(opts =>
+            opts.UseNpgsql(pgCs));
+        builder.Services.AddScoped<IRiskSettingsRepository, RiskSettingsRepository>();
+    }
+    else
+    {
+        // No Postgres — register a no-op so SignalExecutionHandler still resolves.
+        // All signals will be allowed (IsActive defaults to true when settings are absent).
+        builder.Services.AddScoped<IRiskSettingsRepository, NoOpRiskSettingsRepository>();
+    }
+}
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IEconomicCalendarService, ForexFactoryCalendarService>();

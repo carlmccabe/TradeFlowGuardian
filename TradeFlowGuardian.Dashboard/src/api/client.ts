@@ -6,7 +6,6 @@ const BASE = import.meta.env.VITE_API_URL
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    // no-store bypasses the HTTP cache entirely — prevents 304s on polling calls
     cache: 'no-store',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
@@ -15,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// ── Status endpoints ──────────────────────────────────────────────────────────
+// ── Status ────────────────────────────────────────────────────────────────────
 
 export interface BalanceResponse {
   balanceAud: number
@@ -27,6 +26,13 @@ export interface PositionResponse {
   units: number
   unrealizedPL: number
   averagePrice: number
+  side: 'LONG' | 'SHORT' | 'FLAT'
+}
+
+export interface StatusResponse {
+  balanceAud: number
+  positions: PositionResponse[]
+  fetchedAt: string
 }
 
 export interface FilterStatusResponse {
@@ -42,12 +48,40 @@ export interface FilterStatusResponse {
   fetchedAt: string
 }
 
+// ── Risk ──────────────────────────────────────────────────────────────────────
+
+export interface RiskSettingsResponse {
+  instrument: string
+  riskPercent: number
+  isActive: boolean
+  updatedAt: string
+}
+
+// ── Trades ────────────────────────────────────────────────────────────────────
+
+export interface TradeRecord {
+  instrument: string
+  direction: 'Long' | 'Short'
+  entryPrice: number
+  exitPrice: number | null
+  units: number
+  openedAt: string
+  closedAt: string | null
+  durationSeconds: number | null
+}
+
+// ── API client ────────────────────────────────────────────────────────────────
+
 export const api = {
   getBalance: () => request<BalanceResponse>('/status/balance'),
+
+  getStatus: () => request<StatusResponse>('/status'),
 
   getPositions: () => request<PositionResponse[]>('/status/positions'),
 
   getFilterStatus: () => request<FilterStatusResponse>('/status/filters'),
+
+  getTrades: () => request<TradeRecord[]>('/status/trades'),
 
   closePosition: (instrument: string) =>
     request<void>(`/status/close/${instrument}`, { method: 'POST' }),
@@ -57,4 +91,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ paused }),
     }),
+
+  getRiskSettings: () => request<RiskSettingsResponse[]>('/risk'),
+
+  updateRisk: (instrument: string, riskPercent?: number, isActive?: boolean) =>
+    request<RiskSettingsResponse>(`/risk/${instrument}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ riskPercent, isActive }),
+    }),
+
+  pauseAll: () => request<void>('/risk/pause-all', { method: 'POST' }),
+
+  resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
 }
