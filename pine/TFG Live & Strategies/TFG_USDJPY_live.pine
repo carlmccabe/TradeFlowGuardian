@@ -40,8 +40,8 @@ emaDist = math.abs(close - ema) / pipSize
 // ── Session gate ─────────────────────────────────────────────
 utcHour   = hour(time, "UTC")
 inSession = not i_sessionOn or
-            (utcHour >= 0  and utcHour < 9) or
-            (utcHour >= 11 and utcHour < 12)
+             (utcHour >= 0  and utcHour < 9) or
+             (utcHour >= 11 and utcHour < 12)
 
 // ── Signal conditions ─────────────────────────────────────────
 crossUp   = ta.crossover(sma1, sma2)
@@ -165,10 +165,10 @@ if longFired
     alert(
         '{"instrument":"USD_JPY",'  +
         '"direction":"Long",'       +
-        '"price":'    + str.tostring(close,  "#.000") + ',' +
-        '"atr":'      + str.tostring(atr,    "#.000") + ',' +
-        '"stopLoss":' + str.tostring(longSL, "#.000") + ',' +
-        '"takeProfit":' + str.tostring(longTP, "#.000") + '}',
+        '"price":'    + str.tostring(close,  "0.000") + ',' +
+        '"atr":'      + str.tostring(atr,    "0.000") + ',' +
+        '"stopLoss":' + str.tostring(longSL, "0.000") + ',' +
+        '"takeProfit":' + str.tostring(longTP, "0.000") + '}',
         alert.freq_once_per_bar
     )
 
@@ -176,9 +176,9 @@ if shortFired
     alert(
         '{"instrument":"USD_JPY",'  +
         '"direction":"Short",'      +
-        '"price":'    + str.tostring(close,   "#.000") + ',' +
-        '"atr":'      + str.tostring(atr,     "#.000") + ',' +
-        '"stopLoss":' + str.tostring(shortSL, "#.000") + ',' +
-        '"takeProfit":' + str.tostring(shortTP, "#.000") + '}',
+        '"price":'    + str.tostring(close,   "0.000") + ',' +
+        '"atr":'      + str.tostring(atr,     "0.000") + ',' +
+        '"stopLoss":' + str.tostring(shortSL, "0.000") + ',' +
+        '"takeProfit":' + str.tostring(shortTP, "0.000") + '}',
         alert.freq_once_per_bar
     )
