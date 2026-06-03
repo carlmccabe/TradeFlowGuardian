@@ -70,7 +70,7 @@ builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Risk settings (EF / PostgreSQL) ──────────────────────────────────────────
 {
-    var pgCs = builder.Configuration["Postgres:ConnectionString"] ?? string.Empty;
+    var pgCs = PostgresConnectionHelper.Normalize(builder.Configuration["Postgres:ConnectionString"]);
     if (!string.IsNullOrWhiteSpace(pgCs))
     {
         builder.Services.AddDbContext<TradeFlowDbContext>(opts =>

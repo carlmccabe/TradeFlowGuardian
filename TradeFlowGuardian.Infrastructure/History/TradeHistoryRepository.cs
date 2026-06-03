@@ -5,6 +5,7 @@ using Npgsql;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
+using TradeFlowGuardian.Infrastructure.Data;
 
 namespace TradeFlowGuardian.Infrastructure.History;
 
@@ -17,7 +18,7 @@ public class TradeHistoryRepository(
     IOptions<PostgresConfig> config,
     ILogger<TradeHistoryRepository> logger) : ITradeHistoryRepository
 {
-    private readonly string _connectionString = NormalizeConnectionString(config.Value.ConnectionString);
+    private readonly string _connectionString = PostgresConnectionHelper.Normalize(config.Value.ConnectionString);
     
     private const string InsertSql = """
         INSERT INTO trade_history
@@ -119,34 +120,4 @@ public class TradeHistoryRepository(
         }
     }
 
-    private static string NormalizeConnectionString(string connectionString)
-    {
-        connectionString = connectionString?.Trim() ?? string.Empty;
-
-        if (string.IsNullOrEmpty(connectionString))
-            return string.Empty;
-
-        if (!connectionString.Contains("://", StringComparison.Ordinal))
-            return connectionString;
-
-        // URI format (e.g. postgresql://user:pass@host:5432/db from Railway).
-        // If parsing fails, return empty rather than forwarding the raw URL to
-        // NpgsqlConnection — that causes a confusing "index 0" format error.
-        if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
-            return string.Empty;
-
-        var builder = new NpgsqlConnectionStringBuilder
-        {
-            Host = uri.Host,
-            Port = uri.Port > 0 ? uri.Port : 5432,
-            Database = uri.AbsolutePath.Trim('/'),
-            Username = Uri.UnescapeDataString(uri.UserInfo.Split(':')[0]),
-            Password = uri.UserInfo.Contains(':')
-                ? Uri.UnescapeDataString(uri.UserInfo.Split(':', 2)[1])
-                : string.Empty,
-            SslMode = SslMode.Require,
-        };
-
-        return builder.ConnectionString;
-    }
 }
