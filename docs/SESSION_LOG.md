@@ -197,11 +197,55 @@
   shows example payload, explains why `alert()` must own the body
 - No changes to C# execution logic, risk calculations, or field definitions
 
+### 2026-06-03 — Stage 2 dashboard + risk settings DB
+
+**Risk settings**
+- `RiskSettings` entity added to Core — `Instrument` (PK), `RiskPercent`, `IsActive`, `UpdatedAt`
+- `IRiskSettingsRepository` interface added; `RiskSettingsRepository` (EF Core) + `NoOpRiskSettingsRepository` (fallback when Postgres unconfigured) added to Infrastructure
+- `TradeFlowDbContext` added to `Infrastructure/Data/` — snake_case column mapping, seed data (USD_JPY / EUR_USD / GBP_USD at 1.5% active)
+- EF migration `20260603000000_InitRiskSettings` + model snapshot written manually; design-time factory added for future `dotnet ef migrations add`
+- `docs/migrations/003_risk_settings.sql` created — plain SQL equivalent, `IF NOT EXISTS` + `ON CONFLICT DO NOTHING` for safe re-runs
+- `PostgresConnectionHelper.Normalize()` extracted to shared utility in `Infrastructure/Data/` — converts Railway's `postgresql://` URI to Npgsql key=value format; replaces duplicate private method in `TradeHistoryRepository`; used in all three `AddDbContext` / `new NpgsqlConnection` call sites
+- `PositionSizer` updated — reads `RiskPercent` from DB per instrument; signal `RiskPercent > 0` override still applies; falls back to `RiskConfig.DefaultRiskPercent` when no DB row
+- `SignalExecutionHandler` updated — checks `IsActive` after filters; blocks signal and increments `instrument_inactive` metric if false
+- `Npgsql` upgraded 9.0.3 → 10.0.2 to satisfy `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.1` transitive requirement
+
+**API endpoints**
+- `RiskController` added: `GET /api/risk`, `PATCH /api/risk/{instrument}`, `POST /api/risk/pause-all`, `POST /api/risk/resume-all` — all broadcast risk change events via SignalR
+- `StatusController` extended: `GET /api/status` (combined balance + positions), `GET /api/status/trades` (90-day paired entry+close records via lateral join SQL)
+- `PairedTradeRecord` model added to Core; `GetPairedTradesAsync` added to `ITradeHistoryRepository` and implemented in `TradeHistoryRepository`
+
+**SignalR hub**
+- `TradingHub` added at `/hubs/trading`
+- `RedisEventSubscriberService` (hosted service) — subscribes to `tradeflow:events` Redis pub/sub channel, forwards JSON payloads to all SignalR clients
+- Worker publishes `order_filled` and `position_closed` events after every OANDA call
+- Worker publishes `drawdown_breached` event when daily drawdown limit is hit
+- `StatusController.SetPause` broadcasts `pause_changed` directly via `IHubContext<TradingHub>`
+- `RiskController` broadcasts `risk_updated` / `risk_bulk_updated` directly
+
+**Dashboard (React)**
+- `@microsoft/signalr ^8.0.7` added; `/hubs` WebSocket proxy added to `vite.config.ts`
+- `App.tsx` rewritten — two-tab layout (Guard / P&L) with monospace terminal theme
+- **Guard tab** — balance + drawdown banner; per-instrument cards (side badge, entry price, units, unrealised P&L, risk% stepper at 0.1% increments, active/inactive toggle); macro pause/resume button; SignalR live updates for all state changes; 30s polling fallback
+- **P&L tab** — 5-week selectable SVG/CSS bar chart; per-pair breakdown (trade count, total P&L, win rate); trade list with entry→exit, duration, P&L in quote currency; 60s polling
+- `useSignalR` hook — auto-reconnect with back-off (0/2/5/10/30s); silent fallback if hub unreachable
+- `api/client.ts` extended — `getStatus`, `getTrades`, `getRiskSettings`, `updateRisk`, `pauseAll`, `resumeAll`
+- `RISK_STEP` changed from 0.5 to 0.1 (user preference)
+
+**Tests**
+- `StatusControllerTests` updated — `Mock<IHubContext<TradingHub>>` wired in; `IHubClients` + `IClientProxy` mocks set up
+- `PositionSizerTests` updated — `Mock<IRiskSettingsRepository>` (returns null) passed to `BuildSizer`
+- `SignalExecutionHandlerTests` updated — `Mock<IRiskSettingsRepository>` + `Mock<ISubscriber>` added; all 4 handler constructions updated
+- **35/35 tests passing**
+
+**Migrations run on Railway**
+- `001_trade_history.sql` — already present
+- `002_backtest_tables.sql` — applied
+- `003_risk_settings.sql` — applied; rows confirmed: EUR_USD / GBP_USD / USD_JPY at 1.5%
+
 ### Next session goals
-- Run `docs/migrations/001_trade_history.sql` and `002_backtest_tables.sql` against Railway Postgres
-- Set `Postgres:ConnectionString` in Railway env vars for both Api and Worker
-- Add more strategy presets to `StrategyFactory` (ADX-filtered EMAC, RSI mean-reversion)
-- Phase 3 dashboard: backtest results panel (run history, equity curve chart)
-- Phase 3 dashboard: P&L chart (daily/weekly) using trade_history table
-- Phase 3 dashboard: SignalR hub for real-time P&L push
-- Phase 4: GitHub Actions CI/CD
+- True realised P&L in AUD for `/trades` endpoint — OANDA transaction history API or store exit price + realised PnL on Close records
+- Real-time position P&L ticking via SignalR (currently snapshot on fill only)
+- GitHub Actions CI/CD pipeline
+- Cloudflare DNS + SSL
+- Backtest results panel in dashboard (run history, equity curve chart)
