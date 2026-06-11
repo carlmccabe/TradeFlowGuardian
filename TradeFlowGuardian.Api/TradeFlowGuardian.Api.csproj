@@ -7,9 +7,19 @@
     <UserSecretsId>0c8ba922-003e-4a7c-bfa4-1ba9c0ad8b24</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>TradeFlowGuardian.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\TradeFlowGuardian.Backtesting\TradeFlowGuardian.Backtesting.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Infrastructure\TradeFlowGuardian.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Numbered SQL migrations stay in docs/migrations/ (single source of truth);
+         embedded here so the migrate-only pre-deploy entry point can apply them. -->
+    <EmbeddedResource Include="..\docs\migrations\*.sql" Link="Migrations\%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.5" />

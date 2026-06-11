@@ -276,3 +276,21 @@
 - Delete Railway `Oanda__*` env vars once the registry is confirmed seeded
 - True realised P&L in AUD for `/trades` endpoint
 - GitHub Actions CI/CD pipeline
+
+### 2026-06-12
+- **SQL migration runner + pre-deploy entry points** (`feature/migration-runner`) — replaces manual paste-into-Railway-console migrations
+  - `SqlMigrationRunner` (Infrastructure/Data) — hand-rolled on Npgsql/Dapper (~200 lines, fits the no-EF-migrations philosophy; DbUp rejected to avoid a new dependency)
+  - `docs/migrations/*.sql` embedded into the Api assembly (linked, single source of truth stays in docs/)
+  - `schema_versions` table (version, name, applied_at, checksum); SHA-256 checksum verified on every run — editing an applied migration hard-fails the deploy
+  - `pg_advisory_lock` for the whole run — concurrent instances can't double-apply (integration-tested with a pg_sleep race)
+  - Each migration in its own transaction; first failure stops the run with exit 1 so Railway aborts the deploy
+  - `--migrate-only` and `--migrate-baseline N` exit without starting Kestrel/hosted services; normal startup never migrates (logs a warning if pending detected)
+  - Tests: 15 new (unit + integration gated behind `TFG_TEST_POSTGRES`, scratch DB per test) — 70/70 passing
+  - Smoke-tested CLI end-to-end against docker-compose Postgres: fresh apply (001–004), no-op rerun, baseline, baseline-refusal, exit codes
+  - `docs/MIGRATIONS.md` — how to add a migration, immutability rule, staging/prod adoption plan
+
+### Next session goals
+- Adopt the runner: baseline staging + prod (`--migrate-baseline 4`), set Railway pre-deploy command
+- Delete Railway `Oanda__*` env vars once the registry is confirmed seeded
+- True realised P&L in AUD for `/trades` endpoint
+- GitHub Actions CI/CD pipeline
