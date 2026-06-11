@@ -4,6 +4,7 @@ using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Infrastructure.Accounts;
 using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Filters;
@@ -55,11 +56,11 @@ builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, clien
 });
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-{
-    var cs = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
-    return ConnectionMultiplexer.Connect(ParseRedisOptions(cs));
-});
+// Connected eagerly (AbortOnConnectFail=false, so this never throws) because
+// Data Protection key persistence needs the multiplexer instance at registration.
+var redisMux = ConnectionMultiplexer.Connect(
+    ParseRedisOptions(builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+builder.Services.AddSingleton<IConnectionMultiplexer>(redisMux);
 
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
 builder.Services.AddSingleton<IPositionCache, RedisPositionCache>();
@@ -83,6 +84,10 @@ builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
         // All signals will be allowed (IsActive defaults to true when settings are absent).
         builder.Services.AddScoped<IRiskSettingsRepository, NoOpRiskSettingsRepository>();
     }
+
+    // ── Account registry ──────────────────────────────────────────────────────
+    // Same registry as the Api — guarantees both services trade the same account.
+    builder.Services.AddAccountManagement(redisMux, hasPostgres: !string.IsNullOrWhiteSpace(pgCs));
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────

@@ -3,8 +3,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
@@ -13,12 +11,14 @@ namespace TradeFlowGuardian.Infrastructure.Oanda;
 
 /// <summary>
 /// OANDA v20 REST API client.
+/// Credentials are resolved from the active account registry on every call —
+/// switching the active account takes effect immediately, no restart needed.
 /// Docs: https://developer.oanda.com/rest-live-v20/introduction/
 /// </summary>
 public class OandaClient : IOandaClient
 {
     private readonly HttpClient _http;
-    private readonly OandaConfig _config;
+    private readonly IActiveAccountProvider _accounts;
     private readonly ILogger<OandaClient> _logger;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -27,17 +27,25 @@ public class OandaClient : IOandaClient
         WriteIndented = false
     };
 
-    public OandaClient(HttpClient http, IOptions<OandaConfig> config, ILogger<OandaClient> logger)
+    public OandaClient(HttpClient http, IActiveAccountProvider accounts, ILogger<OandaClient> logger)
     {
         _http = http;
-        _config = config.Value;
+        _accounts = accounts;
         _logger = logger;
 
-        _http.BaseAddress = new Uri(_config.BaseUrl);
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.ApiKey);
         _http.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method, ActiveOandaAccount acct, string path,
+        HttpContent? content, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(method, $"{acct.BaseUrl}{path}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", acct.ApiKey);
+        if (content is not null)
+            request.Content = content;
+        return await _http.SendAsync(request, ct);
     }
 
     /// <summary>
@@ -73,13 +81,15 @@ public class OandaClient : IOandaClient
         var json = JsonSerializer.Serialize(body, JsonOpts);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var url = $"/v3/accounts/{_config.AccountId}/orders";
-        _logger.LogInformation("Placing {Direction} order: {Instrument} {Units} units | SL={SL} TP={TP}",
-            signal.Direction, signal.Instrument, signedUnits, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
+        var acct = await _accounts.GetActiveAsync(ct);
+        var url = $"/v3/accounts/{acct.AccountId}/orders";
+        _logger.LogInformation("Placing {Direction} order on {Account} ({Env}): {Instrument} {Units} units | SL={SL} TP={TP}",
+            signal.Direction, acct.Label, acct.Environment, signal.Instrument, signedUnits,
+            stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
 
         try
         {
-            var response = await _http.PostAsync(url, content, ct);
+            var response = await SendAsync(HttpMethod.Post, acct, url, content, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
@@ -126,14 +136,16 @@ public class OandaClient : IOandaClient
     {
         _logger.LogInformation("Closing position: {Instrument}", instrument);
 
+        var acct = await _accounts.GetActiveAsync(ct);
+
         // Determine which sides are open before sending the close request.
         var longUnits  = "NONE";
         var shortUnits = "NONE";
 
         try
         {
-            var posUrl      = $"/v3/accounts/{_config.AccountId}/positions/{instrument}";
-            var posResponse = await _http.GetAsync(posUrl, ct);
+            var posUrl      = $"/v3/accounts/{acct.AccountId}/positions/{instrument}";
+            var posResponse = await SendAsync(HttpMethod.Get, acct, posUrl, null, ct);
 
             if (posResponse.IsSuccessStatusCode)
             {
@@ -164,13 +176,13 @@ public class OandaClient : IOandaClient
             return TradeResult.Succeeded("no-position", 0, 0, 0, 0);
         }
 
-        var url     = $"/v3/accounts/{_config.AccountId}/positions/{instrument}/close";
+        var url     = $"/v3/accounts/{acct.AccountId}/positions/{instrument}/close";
         var body    = new { longUnits, shortUnits };
         var content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
 
         try
         {
-            var response     = await _http.PutAsync(url, content, ct);
+            var response     = await SendAsync(HttpMethod.Put, acct, url, content, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (!response.IsSuccessStatusCode)
@@ -207,11 +219,12 @@ public class OandaClient : IOandaClient
     /// </summary>
     public async Task<decimal> GetAccountBalanceAsync(CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/summary";
-
         try
         {
-            var response = await _http.GetAsync(url, ct);
+            var acct = await _accounts.GetActiveAsync(ct);
+            var url = $"/v3/accounts/{acct.AccountId}/summary";
+
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -233,11 +246,12 @@ public class OandaClient : IOandaClient
     /// </summary>
     public async Task<decimal?> GetMidPriceAsync(string instrument, CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/pricing?instruments={instrument}";
-
         try
         {
-            var response = await _http.GetAsync(url, ct);
+            var acct = await _accounts.GetActiveAsync(ct);
+            var url = $"/v3/accounts/{acct.AccountId}/pricing?instruments={instrument}";
+
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -268,11 +282,12 @@ public class OandaClient : IOandaClient
     /// </summary>
     public async Task<PriceSnapshot?> GetPriceSnapshotAsync(string instrument, CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/pricing?instruments={instrument}";
-
         try
         {
-            var response = await _http.GetAsync(url, ct);
+            var acct = await _accounts.GetActiveAsync(ct);
+            var url = $"/v3/accounts/{acct.AccountId}/pricing?instruments={instrument}";
+
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -310,11 +325,12 @@ public class OandaClient : IOandaClient
     /// </summary>
     public async Task<IReadOnlyList<OpenPositionSummary>> GetAllOpenPositionsAsync(CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/openPositions";
-
         try
         {
-            var response = await _http.GetAsync(url, ct);
+            var acct = await _accounts.GetActiveAsync(ct);
+            var url = $"/v3/accounts/{acct.AccountId}/openPositions";
+
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
             response.EnsureSuccessStatusCode();
 
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -360,11 +376,12 @@ public class OandaClient : IOandaClient
     /// </summary>
     public async Task<decimal?> GetOpenPositionUnitsAsync(string instrument, CancellationToken ct = default)
     {
-        var url = $"/v3/accounts/{_config.AccountId}/positions/{instrument}";
-
         try
         {
-            var response = await _http.GetAsync(url, ct);
+            var acct = await _accounts.GetActiveAsync(ct);
+            var url = $"/v3/accounts/{acct.AccountId}/positions/{instrument}";
+
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 return null;

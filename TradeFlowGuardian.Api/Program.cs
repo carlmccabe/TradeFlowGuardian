@@ -9,6 +9,7 @@ using TradeFlowGuardian.Api.Services;
 using TradeFlowGuardian.Backtesting;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Infrastructure.Accounts;
 using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Drawdown;
@@ -60,11 +61,11 @@ builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Pos
 builder.Services.AddHttpClient<IOandaClient, OandaClient>();
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-{
-    var cs = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
-    return ConnectionMultiplexer.Connect(ParseRedisOptions(cs));
-});
+// Connected eagerly (AbortOnConnectFail=false, so this never throws) because
+// Data Protection key persistence needs the multiplexer instance at registration.
+var redisMux = ConnectionMultiplexer.Connect(
+    ParseRedisOptions(builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379"));
+builder.Services.AddSingleton<IConnectionMultiplexer>(redisMux);
 
 // ── Core Services ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ISignalQueue, RedisSignalQueue>();
@@ -110,6 +111,11 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
     {
         builder.Services.AddScoped<IRiskSettingsRepository, NoOpRiskSettingsRepository>();
     }
+
+    // ── Account registry ──────────────────────────────────────────────────────
+    // Shared with the Worker via Postgres + Redis — replaces Oanda__* env vars.
+    builder.Services.AddAccountManagement(redisMux, hasPostgres: !string.IsNullOrWhiteSpace(pgCs));
+    builder.Services.AddHostedService<AccountSeedService>();
 }
 
 // ── SignalR ───────────────────────────────────────────────────────────────────

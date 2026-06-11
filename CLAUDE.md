@@ -46,6 +46,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - **Live FX rates** — PositionSizer calls OANDA `/pricing` endpoint; conservative hardcoded fallbacks on failure
 - **Trade history write-after-execute** — ITradeHistoryRepository.InsertAsync called with CancellationToken.None after every order attempt; log-and-swallow so a DB outage never masks a fill
 - **Migrations are manual SQL** — run `docs/migrations/*.sql` in order; no EF, no auto-runner
+- **Account registry, not env vars** — OANDA credentials live in `oanda_accounts` (Postgres, API key encrypted via Data Protection, keys in Redis under `tradeflow:dataprotection-keys`). Exactly one active account, shared by Api and Worker; switch via `/api/accounts` (X-Admin-Secret header = webhook secret) or the dashboard Acct tab. Services resolve credentials per call through `IActiveAccountProvider` (30s cache, Redis pub/sub invalidation on `tradeflow:account-changed`); the legacy `Oanda` config section is seed/fallback only
 
 ## Current Phase: 1 — Foundation
 ### Done
@@ -130,6 +131,7 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 - Do not call OANDA API outside of OandaClient
 - Do not add packages without checking .NET 10 compatibility first
 - Do not modify appsettings.json with real credentials — use user-secrets
+- Do not read OANDA credentials from IConfiguration/env vars in services — always resolve via IActiveAccountProvider
 - Do not pyramid — one position per instrument, enforced in SignalExecutionHandler
 - Do not skip the idempotency check
 - Do not use EF or an auto-migration runner — schema changes are plain SQL in `docs/migrations/`
