@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Prometheus;
 using StackExchange.Redis;
+using TradeFlowGuardian.Api;
 using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Api.Middleware;
 using TradeFlowGuardian.Api.Services;
@@ -20,6 +21,14 @@ using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
 using TradeFlowGuardian.Infrastructure.Risk;
+
+// ── Migration entry points (Railway pre-deploy) ──────────────────────────────
+// --migrate-only / --migrate-baseline N run migrations and exit without starting
+// Kestrel or any hosted services. Normal startup never migrates.
+if (MigrationCli.IsMigrationCommand(args))
+{
+    return await MigrationCli.RunAsync(args);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -174,6 +183,12 @@ var app = builder.Build();
         RedisHost(redisCfg.ConnectionString), redisCfg.StreamName,
         filterCfg.EnableAtrSpikeFilter, filterCfg.EnableNewsFilter,
         builder.Configuration["Dashboard:Origin"] ?? "http://localhost:5173");
+
+    // Warn (without blocking startup) if SQL migrations are pending — the Railway
+    // pre-deploy command owns applying them; the app never migrates itself.
+    var migrationCheckCs = PostgresConnectionHelper.Normalize(builder.Configuration["Postgres:ConnectionString"]);
+    if (!string.IsNullOrWhiteSpace(migrationCheckCs))
+        _ = Task.Run(() => MigrationCli.WarnIfPendingAsync(migrationCheckCs, startupLog));
 }
 
 if (app.Environment.IsDevelopment())
@@ -211,6 +226,8 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 app.Run();
+
+return 0;
 
 // Strips auth credentials from both redis://user:pass@host and host:port formats.
 static string RedisHost(string cs) =>
