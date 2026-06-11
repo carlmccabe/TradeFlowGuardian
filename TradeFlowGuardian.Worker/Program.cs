@@ -128,16 +128,25 @@ var host = builder.Build();
 
 // ── Startup config banner ─────────────────────────────────────────────────────
 {
-    var startupLog = host.Services.GetRequiredService<ILogger<Program>>();
-    var oandaCfg   = host.Services.GetRequiredService<IOptions<OandaConfig>>().Value;
-    var redisCfg   = host.Services.GetRequiredService<IOptions<RedisConfig>>().Value;
-    var filterCfg  = host.Services.GetRequiredService<IOptions<FilterConfig>>().Value;
-    var newsCfg    = host.Services.GetRequiredService<IOptions<NewsFilterOptions>>().Value;
-    startupLog.LogInformation(
-        "Worker starting | OANDA={OandaEnv} | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | Consumer={Consumer} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter}",
-        oandaCfg.Environment, oandaCfg.BaseUrl,
-        RedisHost(redisCfg.ConnectionString), redisCfg.StreamName, redisCfg.ConsumerName,
-        filterCfg.EnableAtrSpikeFilter, newsCfg.Enabled);
+    var startupLog    = host.Services.GetRequiredService<ILogger<Program>>();
+    var accountProvider = host.Services.GetRequiredService<IActiveAccountProvider>();
+    var redisCfg      = host.Services.GetRequiredService<IOptions<RedisConfig>>().Value;
+    var filterCfg     = host.Services.GetRequiredService<IOptions<FilterConfig>>().Value;
+    var newsCfg       = host.Services.GetRequiredService<IOptions<NewsFilterOptions>>().Value;
+    try
+    {
+        var activeAcct = await accountProvider.GetActiveAsync();
+        startupLog.LogInformation(
+            "Worker starting | OANDA={OandaEnv} | Account={Label} ({AccountId}) | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | Consumer={Consumer} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter}",
+            activeAcct.Environment, activeAcct.Label, activeAcct.AccountId, activeAcct.BaseUrl,
+            RedisHost(redisCfg.ConnectionString), redisCfg.StreamName, redisCfg.ConsumerName,
+            filterCfg.EnableAtrSpikeFilter, newsCfg.Enabled);
+    }
+    catch (Exception ex)
+    {
+        startupLog.LogCritical(ex,
+            "Worker starting but NO active OANDA account found — trades will fail until an account is activated via /api/accounts");
+    }
 }
 
 host.Run();
