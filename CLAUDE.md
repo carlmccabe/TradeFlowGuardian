@@ -35,7 +35,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - Secrets via macOS Keychain (ACL-protected) for Docker dev — see [docs/SECRETS.md](./docs/SECRETS.md)
 - Production secrets via Azure Key Vault only — live credentials never touch the dev machine
 - Never commit secrets — no appsettings.Production.json, no .env files, no secrets.json
-- DB schema changes go in `docs/migrations/` as numbered SQL files (e.g. `001_trade_history.sql`) — run manually against Postgres; no auto-migration runner
+- DB schema changes go in `docs/migrations/` as numbered SQL files (e.g. `001_trade_history.sql`) — embedded in the Api assembly and applied by `SqlMigrationRunner` via the Railway pre-deploy command (`--migrate-only`); immutable once merged — see [docs/MIGRATIONS.md](./docs/MIGRATIONS.md)
 
 ## Key Design Decisions
 - **No pyramiding** — Worker checks for open position before every entry
@@ -45,7 +45,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - **Secret query param validation** — POST /api/signal only (`?secret=`); GET endpoints are unauthenticated
 - **Live FX rates** — PositionSizer calls OANDA `/pricing` endpoint; conservative hardcoded fallbacks on failure
 - **Trade history write-after-execute** — ITradeHistoryRepository.InsertAsync called with CancellationToken.None after every order attempt; log-and-swallow so a DB outage never masks a fill
-- **Migrations are manual SQL** — run `docs/migrations/*.sql` in order; no EF, no auto-runner
+- **Migrations are plain SQL, applied pre-deploy** — `docs/migrations/*.sql` run in order by `SqlMigrationRunner` (`dotnet TradeFlowGuardian.Api.dll --migrate-only`), tracked in `schema_versions` with checksums, advisory-locked; no EF migrations. Normal app startup never migrates
 - **Account registry, not env vars** — OANDA credentials live in `oanda_accounts` (Postgres, API key encrypted via Data Protection, keys in Redis under `tradeflow:dataprotection-keys`). Exactly one active account, shared by Api and Worker; switch via `/api/accounts` (X-Admin-Secret header = webhook secret) or the dashboard Acct tab. Services resolve credentials per call through `IActiveAccountProvider` (30s cache, Redis pub/sub invalidation on `tradeflow:account-changed`); the legacy `Oanda` config section is seed/fallback only
 
 ## Current Phase: 1 — Foundation
@@ -134,7 +134,8 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 - Do not read OANDA credentials from IConfiguration/env vars in services — always resolve via IActiveAccountProvider
 - Do not pyramid — one position per instrument, enforced in SignalExecutionHandler
 - Do not skip the idempotency check
-- Do not use EF or an auto-migration runner — schema changes are plain SQL in `docs/migrations/`
+- Do not use EF migrations — schema changes are plain SQL in `docs/migrations/`, applied by `SqlMigrationRunner` at pre-deploy
+- Do not edit a migration file once merged — checksums are verified; add a new numbered migration instead
 - Do not let a trade history write failure surface to the caller — TradeHistoryRepository must log-and-swallow
 
 ## Tech Debt
