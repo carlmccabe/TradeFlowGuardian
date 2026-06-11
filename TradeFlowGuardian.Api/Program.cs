@@ -16,6 +16,7 @@ using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.History;
+using TradeFlowGuardian.Infrastructure.Logging;
 using TradeFlowGuardian.Infrastructure.Pause;
 using TradeFlowGuardian.Infrastructure.Oanda;
 using TradeFlowGuardian.Infrastructure.Queue;
@@ -56,6 +57,9 @@ else
         opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions { Indented = false };
     });
 }
+// Ships logs to Grafana Cloud (Loki) when OTEL_EXPORTER_OTLP_* env vars are set;
+// no-op otherwise. Console logging above is unaffected. See docs/LOGGING.md.
+builder.Logging.AddOtlpExportIfConfigured("tradeflow-api");
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 builder.Services.Configure<OandaConfig>(builder.Configuration.GetSection("Oanda"));
