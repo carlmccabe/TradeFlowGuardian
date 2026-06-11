@@ -70,6 +70,67 @@ export interface TradeRecord {
   durationSeconds: number | null
 }
 
+// ── Accounts ──────────────────────────────────────────────────────────────────
+
+export interface AccountResponse {
+  id: string
+  label: string
+  accountId: string
+  environment: 'fxpractice' | 'fxtrade'
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ActiveAccountResponse {
+  label: string
+  accountId: string
+  environment: 'fxpractice' | 'fxtrade'
+  isLive: boolean
+}
+
+export interface CreateAccountRequest {
+  label: string
+  accountId: string
+  environment: 'fxpractice' | 'fxtrade'
+  apiKey: string
+  activate: boolean
+  confirmLive: boolean
+}
+
+// Admin secret for account management endpoints (X-Admin-Secret header).
+// Kept in localStorage so it survives reloads on the user's own device.
+const ADMIN_SECRET_KEY = 'tfg_admin_secret'
+
+export const adminSecret = {
+  get: () => localStorage.getItem(ADMIN_SECRET_KEY) ?? '',
+  set: (value: string) => localStorage.setItem(ADMIN_SECRET_KEY, value),
+  clear: () => localStorage.removeItem(ADMIN_SECRET_KEY),
+}
+
+// Like request(), but sends the admin secret and surfaces the server's error message.
+async function adminRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    cache: 'no-store',
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Secret': adminSecret.get(),
+      ...init?.headers,
+    },
+  })
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const body = await res.json()
+      if (body?.error) message = body.error
+    } catch { /* non-JSON error body */ }
+    throw new Error(message)
+  }
+  if (res.status === 204) return undefined as T
+  return res.json() as Promise<T>
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -103,4 +164,23 @@ export const api = {
   pauseAll: () => request<void>('/risk/pause-all', { method: 'POST' }),
 
   resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
+
+  getActiveAccount: () => request<ActiveAccountResponse>('/accounts/active'),
+
+  getAccounts: () => adminRequest<AccountResponse[]>('/accounts'),
+
+  createAccount: (body: CreateAccountRequest) =>
+    adminRequest<AccountResponse>('/accounts', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  activateAccount: (id: string, confirmLive: boolean) =>
+    adminRequest<AccountResponse>(`/accounts/${id}/activate`, {
+      method: 'PUT',
+      body: JSON.stringify({ confirmLive }),
+    }),
+
+  deleteAccount: (id: string) =>
+    adminRequest<void>(`/accounts/${id}`, { method: 'DELETE' }),
 }

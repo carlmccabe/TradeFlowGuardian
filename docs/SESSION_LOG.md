@@ -249,3 +249,30 @@
 - GitHub Actions CI/CD pipeline
 - Cloudflare DNS + SSL
 - Backtest results panel in dashboard (run history, equity curve chart)
+
+### 2026-06-11 — Account management system (no more env vars)
+**Problem found:** Api and Worker each carried their own `Oanda__AccountId`/`Oanda__ApiKey`/`Oanda__Environment` env vars (Railway + docker-compose). They had drifted — Api pointed at the live account while the Worker executed on fxpractice. Nothing in code kept them in sync.
+
+**Fix — shared encrypted account registry:**
+- `oanda_accounts` table (migration `004_oanda_accounts.sql`) — label, account_id, environment, encrypted API key; partial unique index enforces exactly one active account; both services read the same row
+- API keys encrypted at rest via ASP.NET Data Protection (`Microsoft.AspNetCore.DataProtection.StackExchangeRedis` 10.0.9) — keys persisted to Redis under `tradeflow:dataprotection-keys`, app name `TradeFlowGuardian`, so Api-written ciphertext is Worker-readable. Zero OANDA env vars remain
+- `IOandaAccountStore` (EF CRUD, `OandaAccountRepository`) + `IActiveAccountProvider` (`ActiveAccountProvider` singleton: 30s cache, Redis pub/sub invalidation on `tradeflow:account-changed`, fallback to legacy `Oanda` config section when registry empty)
+- `OandaClient` rewired — resolves the active account per request (URL + bearer per call); account switch takes effect without restart in both services
+- `AccountsController` — GET/POST `/api/accounts`, PUT `/{id}/activate`, DELETE, GET `/accounts/active`; secured via `X-Admin-Secret` header (= webhook secret); activating fxtrade requires `confirmLive=true`; API keys are write-only; publishes `account_changed` to `tradeflow:events` (SignalR) + invalidation channel
+- `AccountSeedService` (Api) — one-time idempotent seed from the `Oanda` config section if the table is empty
+- Dashboard "Acct" tab — active-account banner (LIVE/DEMO badge), admin-secret unlock, account list with activate/delete (typed "LIVE" confirmation for fxtrade), add-account form; SignalR `account_changed` refresh
+- docker-compose: `OANDA_API_KEY`/`OANDA_ACCOUNT_ID` env vars removed from api + worker
+- Bumped vulnerable `Microsoft.AspNetCore.DataProtection` transitive chain → `Microsoft.Extensions.*` 10.0.9 across Infrastructure/Backtesting/Tests/Worker (NU1903/NU1904 cleared)
+
+**Tests** — `OandaAccountRepositoryTests` (SQLite in-memory, encryption round-trip, single-active invariant), `ActiveAccountProviderTests` (registry/fallback/cache), `AccountsControllerTests` (auth, confirmLive gate). **55/55 passing**
+
+**Deploy steps (manual):**
+1. Run `docs/migrations/004_oanda_accounts.sql` against Railway Postgres
+2. Deploy Api + Worker — Api seeds the registry from the existing env vars on first boot
+3. Verify GET `/api/accounts` shows the seeded account, register the correct demo/live accounts via the dashboard Acct tab
+4. Delete `Oanda__*` env vars from BOTH Railway services
+
+### Next session goals
+- Delete Railway `Oanda__*` env vars once the registry is confirmed seeded
+- True realised P&L in AUD for `/trades` endpoint
+- GitHub Actions CI/CD pipeline

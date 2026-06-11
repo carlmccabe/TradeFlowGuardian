@@ -61,9 +61,8 @@ services:
       - "8080:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - Oanda__ApiKey=${OANDA_API_KEY}
-      - Oanda__AccountId=${OANDA_ACCOUNT_ID}
-      - Oanda__Environment=fxpractice
+      # OANDA credentials live in the oanda_accounts table (encrypted) — manage
+      # via POST /api/accounts (X-Admin-Secret header) or the dashboard.
       - Webhook__Secret=${WEBHOOK_SECRET}
       - Risk__DefaultRiskPercent=1.0
       - Filters__EnableAtrSpikeFilter=true
@@ -97,9 +96,7 @@ services:
       - "9091:9091"   # Prometheus metrics scrape port (internal only in prod)
     environment:
       - DOTNET_ENVIRONMENT=Development
-      - Oanda__ApiKey=${OANDA_API_KEY}
-      - Oanda__AccountId=${OANDA_ACCOUNT_ID}
-      - Oanda__Environment=fxpractice
+      # OANDA credentials come from the shared oanda_accounts table — no env vars.
       - Risk__DefaultRiskPercent=1.0
       - Filters__EnableAtrSpikeFilter=true
       - Redis__ConnectionString=redis:6379

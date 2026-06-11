@@ -12,6 +12,7 @@ export type TradingEvent =
   | { type: 'risk_bulk_updated'; isActive: boolean }
   | { type: 'pause_changed'; paused: boolean }
   | { type: 'drawdown_breached'; balance: number }
+  | { type: 'account_changed'; label: string; accountId: string; environment: string }
 
 export function useSignalR(onEvent: (event: TradingEvent) => void) {
   const connRef = useRef<signalR.HubConnection | null>(null)
