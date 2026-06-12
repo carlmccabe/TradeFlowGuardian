@@ -277,6 +277,17 @@
 - True realised P&L in AUD for `/trades` endpoint
 - GitHub Actions CI/CD pipeline
 
+### 2026-06-12 (session 2)
+- **Grafana Cloud centralized logging** (`feature/grafana-cloud-logs`)
+  - `OtlpLoggingExtensions.AddOtlpExportIfConfigured()` (Infrastructure/Logging) — OpenTelemetry OTLP log exporter alongside the existing console providers; activates only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so dev/tests/CI are untouched
+  - Wired into Api (`tradeflow-api`) and Worker (`tradeflow-worker`); `deployment_environment` label from `RAILWAY_ENVIRONMENT_NAME`
+  - Package: OpenTelemetry.Exporter.OpenTelemetryProtocol 1.16.0 (net10 compatible)
+  - Verified end-to-end against a local OTLP listener: batched protobuf POSTs to /v1/logs with auth header, console JSON unaffected; 55/55 tests pass
+  - `docs/LOGGING.md` — Grafana Cloud token setup, the 3 Railway env vars, LogQL examples
+
+### Next session goals
+- Set OTEL_* env vars on Api + Worker in Railway (staging first) and confirm logs in Grafana Drilldown
+- Adopt the migration runner (PR #21): baseline staging + prod, set pre-deploy command
 ### 2026-06-12
 - **SQL migration runner + pre-deploy entry points** (`feature/migration-runner`) — replaces manual paste-into-Railway-console migrations
   - `SqlMigrationRunner` (Infrastructure/Data) — hand-rolled on Npgsql/Dapper (~200 lines, fits the no-EF-migrations philosophy; DbUp rejected to avoid a new dependency)

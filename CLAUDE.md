@@ -32,6 +32,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - Scoped services per signal in Worker (new DI scope per HandleAsync call)
 - All OANDA calls go through IOandaClient — never call HttpClient directly from handlers
 - Config via IOptions<T> pattern — never read IConfiguration directly in services
+- Centralized logs: both services export to Grafana Cloud (Loki) via OTLP when `OTEL_EXPORTER_OTLP_*` env vars are set; JSON console stays for Railway's viewer — see [docs/LOGGING.md](./docs/LOGGING.md)
 - Secrets via macOS Keychain (ACL-protected) for Docker dev — see [docs/SECRETS.md](./docs/SECRETS.md)
 - Production secrets via Azure Key Vault only — live credentials never touch the dev machine
 - Never commit secrets — no appsettings.Production.json, no .env files, no secrets.json
