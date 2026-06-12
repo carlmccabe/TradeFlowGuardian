@@ -3,12 +3,14 @@ using Microsoft.Extensions.Options;
 using Prometheus;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Accounts;
 using TradeFlowGuardian.Infrastructure.Calendar;
 using TradeFlowGuardian.Infrastructure.Data;
 using TradeFlowGuardian.Infrastructure.Filters;
-using TradeFlowGuardian.Infrastructure.Oanda;
+using TradeFlowGuardian.Infrastructure.Brokers.Oanda;
+using TradeFlowGuardian.Infrastructure.Sizing;
 using TradeFlowGuardian.Infrastructure.Cache;
 using TradeFlowGuardian.Infrastructure.Drawdown;
 using TradeFlowGuardian.Infrastructure.History;
@@ -52,7 +54,7 @@ builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
-builder.Services.AddHttpClient<IOandaClient, OandaClient>();
+builder.Services.AddHttpClient<IBrokerClient, OandaBrokerClient>();
 builder.Services.AddHttpClient(ForexFactoryCalendarService.HttpClientName, client =>
 {
     client.DefaultRequestHeaders.UserAgent.ParseAdd("TradeFlowGuardian/1.0");

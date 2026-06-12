@@ -3,23 +3,29 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Enums;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 
-namespace TradeFlowGuardian.Infrastructure.Oanda;
+namespace TradeFlowGuardian.Infrastructure.Brokers.Oanda;
 
 /// <summary>
-/// OANDA v20 REST API client.
+/// OANDA v20 REST API adapter for <see cref="IBrokerClient"/>.
+/// All OANDA request/response shapes, endpoint paths, and v20 quirks live here.
 /// Credentials are resolved from the active account registry on every call —
 /// switching the active account takes effect immediately, no restart needed.
 /// Docs: https://developer.oanda.com/rest-live-v20/introduction/
 /// </summary>
-public class OandaClient : IOandaClient
+public class OandaBrokerClient : IBrokerClient
 {
+    // OANDA AU (ASIC) retail leverage is 30:1 — the API's reported 100:1 is
+    // deliberately ignored for position sizing.
+    public BrokerDescriptor Descriptor { get; } = new("oanda", 30m);
+
     private readonly HttpClient _http;
     private readonly IActiveAccountProvider _accounts;
-    private readonly ILogger<OandaClient> _logger;
+    private readonly ILogger<OandaBrokerClient> _logger;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -27,7 +33,7 @@ public class OandaClient : IOandaClient
         WriteIndented = false
     };
 
-    public OandaClient(HttpClient http, IActiveAccountProvider accounts, ILogger<OandaClient> logger)
+    public OandaBrokerClient(HttpClient http, IActiveAccountProvider accounts, ILogger<OandaBrokerClient> logger)
     {
         _http = http;
         _accounts = accounts;
@@ -403,4 +409,13 @@ public class OandaClient : IOandaClient
             return null;
         }
     }
+
+    /// <summary>
+    /// Not yet implemented — part of the broker port ahead of realised-P&amp;L work.
+    /// TODO: implement via GET /v3/accounts/{id}/transactions (sinceid/daterange paging).
+    /// </summary>
+    public Task<IReadOnlyList<BrokerTransaction>> GetTransactionsAsync(
+        DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
+        => throw new NotImplementedException(
+            "TODO: realised P&L — OANDA /v3/accounts/{id}/transactions");
 }

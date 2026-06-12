@@ -4,6 +4,7 @@ using Moq;
 using StackExchange.Redis;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 using TradeFlowGuardian.Worker.Handlers;
@@ -14,7 +15,7 @@ namespace TradeFlowGuardian.Tests;
 public class SignalExecutionHandlerTests
 {
     private readonly Mock<ISignalFilter> _filterMock = new();
-    private readonly Mock<IOandaClient> _oandaMock = new();
+    private readonly Mock<IBrokerClient> _oandaMock = new();
     private readonly Mock<IPositionSizer> _sizerMock = new();
     private readonly Mock<IPositionCache> _positionCacheMock = new();
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock = new();

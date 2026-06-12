@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
 using TradeFlowGuardian.Api.Controllers;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 using Xunit;
@@ -10,13 +11,13 @@ namespace TradeFlowGuardian.Tests;
 
 public class PriceControllerTests
 {
-    private readonly Mock<IOandaClient> _oandaMock;
+    private readonly Mock<IBrokerClient> _oandaMock;
     private readonly Mock<ILogger<PriceController>> _loggerMock;
     private readonly PriceController _controller;
 
     public PriceControllerTests()
     {
-        _oandaMock = new Mock<IOandaClient>();
+        _oandaMock = new Mock<IBrokerClient>();
         _loggerMock = new Mock<ILogger<PriceController>>();
         _controller = new PriceController(_oandaMock.Object, _loggerMock.Object);
     }
