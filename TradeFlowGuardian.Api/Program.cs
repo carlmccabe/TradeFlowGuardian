@@ -9,6 +9,7 @@ using TradeFlowGuardian.Api.Middleware;
 using TradeFlowGuardian.Api.Services;
 using TradeFlowGuardian.Backtesting;
 using TradeFlowGuardian.Core.Configuration;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Infrastructure.Accounts;
 using TradeFlowGuardian.Infrastructure.Calendar;
@@ -18,7 +19,8 @@ using TradeFlowGuardian.Infrastructure.Filters;
 using TradeFlowGuardian.Infrastructure.History;
 using TradeFlowGuardian.Infrastructure.Logging;
 using TradeFlowGuardian.Infrastructure.Pause;
-using TradeFlowGuardian.Infrastructure.Oanda;
+using TradeFlowGuardian.Infrastructure.Brokers.Oanda;
+using TradeFlowGuardian.Infrastructure.Sizing;
 using TradeFlowGuardian.Infrastructure.Queue;
 using TradeFlowGuardian.Infrastructure.Risk;
 
@@ -71,7 +73,7 @@ builder.Services.Configure<NewsFilterOptions>(builder.Configuration.GetSection("
 builder.Services.Configure<PostgresConfig>(builder.Configuration.GetSection("Postgres"));
 
 // ── HTTP Client ───────────────────────────────────────────────────────────────
-builder.Services.AddHttpClient<IOandaClient, OandaClient>();
+builder.Services.AddHttpClient<IBrokerClient, OandaBrokerClient>();
 
 // ── Redis ─────────────────────────────────────────────────────────────────────
 // Connected eagerly (AbortOnConnectFail=false, so this never throws) because

@@ -20,7 +20,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 | Project | Role |
 |---|---|
 | `TradeFlowGuardian.Core` | Models, interfaces, config — zero dependencies |
-| `TradeFlowGuardian.Infrastructure` | OandaClient, filters, queue — depends on Core only |
+| `TradeFlowGuardian.Infrastructure` | OandaBrokerClient (broker adapter), filters, queue — depends on Core only |
 | `TradeFlowGuardian.Api` | Webhook receiver, status/kill-switch endpoints |
 | `TradeFlowGuardian.Worker` | Background execution loop, signal handler |
 
@@ -30,7 +30,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - No direct dependencies between Api and Worker — they share only via Core interfaces
 - ISignalQueue is singleton — the bridge between Api (writer) and Worker (reader)
 - Scoped services per signal in Worker (new DI scope per HandleAsync call)
-- All OANDA calls go through IOandaClient — never call HttpClient directly from handlers
+- All broker calls go through IBrokerClient (Core/Brokers) — OANDA is one adapter (Infrastructure/Brokers/Oanda/OandaBrokerClient); never call HttpClient directly from handlers — see [docs/BROKER_ABSTRACTION.md](./docs/BROKER_ABSTRACTION.md)
 - Config via IOptions<T> pattern — never read IConfiguration directly in services
 - Centralized logs: both services export to Grafana Cloud (Loki) via OTLP when `OTEL_EXPORTER_OTLP_*` env vars are set; JSON console stays for Railway's viewer — see [docs/LOGGING.md](./docs/LOGGING.md)
 - Secrets via macOS Keychain (ACL-protected) for Docker dev — see [docs/SECRETS.md](./docs/SECRETS.md)
@@ -129,7 +129,7 @@ Direction values: `"Long"` | `"Short"` | `"Close"`
 ## What NOT To Do
 - Do not add features mid-phase without principal engineer approval
 - Do not read IConfiguration directly — always IOptions<T>
-- Do not call OANDA API outside of OandaClient
+- Do not call broker APIs outside an IBrokerClient adapter (OANDA: OandaBrokerClient) — no broker DTOs or naming outside Infrastructure/Brokers/
 - Do not add packages without checking .NET 10 compatibility first
 - Do not modify appsettings.json with real credentials — use user-secrets
 - Do not read OANDA credentials from IConfiguration/env vars in services — always resolve via IActiveAccountProvider

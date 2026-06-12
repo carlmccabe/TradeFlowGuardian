@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 
 namespace TradeFlowGuardian.Api.Controllers;
@@ -12,7 +13,7 @@ namespace TradeFlowGuardian.Api.Controllers;
 [Route("api/[controller]")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public class StatusController(
-    IOandaClient oanda,
+    IBrokerClient broker,
     IPauseState pauseState,
     IDailyDrawdownGuard drawdownGuard,
     ITradeHistoryRepository tradeHistory,
@@ -26,8 +27,8 @@ public class StatusController(
     [HttpGet]
     public async Task<IActionResult> GetStatus(CancellationToken ct)
     {
-        var balance   = await oanda.GetAccountBalanceAsync(ct);
-        var positions = await oanda.GetAllOpenPositionsAsync(ct);
+        var balance   = await broker.GetAccountBalanceAsync(ct);
+        var positions = await broker.GetAllOpenPositionsAsync(ct);
         return Ok(new
         {
             balanceAud = balance,
@@ -69,7 +70,7 @@ public class StatusController(
     [HttpGet("positions")]
     public async Task<IActionResult> GetPositions(CancellationToken ct)
     {
-        var positions = await oanda.GetAllOpenPositionsAsync(ct);
+        var positions = await broker.GetAllOpenPositionsAsync(ct);
         return Ok(positions.Select(p => new
         {
             instrument = p.Instrument,
@@ -100,7 +101,7 @@ public class StatusController(
     [HttpGet("balance")]
     public async Task<IActionResult> GetBalance(CancellationToken ct)
     {
-        var balance = await oanda.GetAccountBalanceAsync(ct);
+        var balance = await broker.GetAccountBalanceAsync(ct);
         return Ok(new { balanceAud = balance, fetchedAt = DateTimeOffset.UtcNow });
     }
 
@@ -108,7 +109,7 @@ public class StatusController(
     [HttpGet("position/{instrument}")]
     public async Task<IActionResult> GetPosition(string instrument, CancellationToken ct)
     {
-        var units = await oanda.GetOpenPositionUnitsAsync(instrument, ct);
+        var units = await broker.GetOpenPositionUnitsAsync(instrument, ct);
         return Ok(new
         {
             instrument,
@@ -139,7 +140,7 @@ public class StatusController(
 
         if (dayOpenNav.HasValue)
         {
-            currentBalance = await oanda.GetAccountBalanceAsync(ct);
+            currentBalance = await broker.GetAccountBalanceAsync(ct);
             if (dayOpenNav.Value > 0)
                 drawdownPercent = (dayOpenNav.Value - currentBalance.Value) / dayOpenNav.Value * 100m;
         }
@@ -183,7 +184,7 @@ public class StatusController(
     public async Task<IActionResult> ClosePosition(string instrument, CancellationToken ct)
     {
         logger.LogWarning("Manual close triggered for {Instrument}", instrument);
-        var result = await oanda.ClosePositionAsync(instrument, ct);
+        var result = await broker.ClosePositionAsync(instrument, ct);
 
         return result.Success
             ? Ok(new { message = result.Message, instrument })

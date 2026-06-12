@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 
@@ -6,13 +7,13 @@ namespace TradeFlowGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class PriceController(IOandaClient oanda, ILogger<PriceController> logger) : ControllerBase
+public class PriceController(IBrokerClient broker, ILogger<PriceController> logger) : ControllerBase
 {
     /// <summary>Returns the current mid price for an instrument.</summary>
     [HttpGet("mid/{instrument}")]
     public async Task<IActionResult> GetMidPrice(string instrument, CancellationToken ct)
     {
-        var mid = await oanda.GetMidPriceAsync(instrument, ct);
+        var mid = await broker.GetMidPriceAsync(instrument, ct);
         logger.LogInformation("Mid price for {Instrument} is {MidPrice}", instrument, mid);
         
         if (!mid.HasValue)
@@ -28,7 +29,7 @@ public class PriceController(IOandaClient oanda, ILogger<PriceController> logger
     [ProducesResponseType(typeof(PriceSnapshot), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPriceSnapshot(string instrument, CancellationToken ct)
     {
-        var snapshot = await oanda.GetPriceSnapshotAsync(instrument, ct);
+        var snapshot = await broker.GetPriceSnapshotAsync(instrument, ct);
         
         if (snapshot is null)
         {
@@ -43,7 +44,7 @@ public class PriceController(IOandaClient oanda, ILogger<PriceController> logger
     [HttpGet("bid/{instrument}")]
     public async Task<IActionResult> GetBidPrice(string instrument, CancellationToken ct)
     {
-        var snapshot = await oanda.GetPriceSnapshotAsync(instrument, ct);
+        var snapshot = await broker.GetPriceSnapshotAsync(instrument, ct);
         return snapshot is not null
             ? Ok(new { instrument, bid = snapshot.Bid, fetchedAt = snapshot.FetchedAt })
             : StatusCode(502, new { error = "Pricing unavailable", instrument });
@@ -53,7 +54,7 @@ public class PriceController(IOandaClient oanda, ILogger<PriceController> logger
     [HttpGet("ask/{instrument}")]
     public async Task<IActionResult> GetAskPrice(string instrument, CancellationToken ct)
     {
-        var snapshot = await oanda.GetPriceSnapshotAsync(instrument, ct);
+        var snapshot = await broker.GetPriceSnapshotAsync(instrument, ct);
         return snapshot is not null
             ? Ok(new { instrument, ask = snapshot.Ask, fetchedAt = snapshot.FetchedAt })
             : StatusCode(502, new { error = "Pricing unavailable", instrument });

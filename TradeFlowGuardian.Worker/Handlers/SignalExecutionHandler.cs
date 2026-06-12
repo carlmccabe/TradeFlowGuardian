@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 using Prometheus;
@@ -20,7 +21,7 @@ namespace TradeFlowGuardian.Worker.Handlers;
 /// </summary>
 public class SignalExecutionHandler(
     ISignalFilter filter,
-    IOandaClient oanda,
+    IBrokerClient broker,
     IPositionSizer sizer,
     IPositionCache positionCache,
     IDailyDrawdownGuard drawdownGuard,
@@ -91,7 +92,7 @@ public class SignalExecutionHandler(
         if (signal.Direction == SignalDirection.Close)
         {
             // CancellationToken.None — must not abort a close request once sent.
-            var closeResult = await oanda.ClosePositionAsync(signal.Instrument, CancellationToken.None);
+            var closeResult = await broker.ClosePositionAsync(signal.Instrument, CancellationToken.None);
             await tradeHistory.InsertAsync(new TradeHistoryRecord
             {
                 Instrument   = signal.Instrument,
@@ -156,7 +157,7 @@ public class SignalExecutionHandler(
         }
         else
         {
-            existingUnits = await oanda.GetOpenPositionUnitsAsync(signal.Instrument, ct);
+            existingUnits = await broker.GetOpenPositionUnitsAsync(signal.Instrument, ct);
             if (existingUnits is not null)
                 await positionCache.SetAsync(signal.Instrument, existingUnits.Value, ct);
         }
@@ -170,7 +171,7 @@ public class SignalExecutionHandler(
         }
 
         // ── Position sizing ───────────────────────────────────────────────────
-        var balance = await oanda.GetAccountBalanceAsync(ct);
+        var balance = await broker.GetAccountBalanceAsync(ct);
         if (balance <= 0)
         {
             logger.LogError("Aborting signal for {Instrument}: Could not fetch account balance or balance is non-positive ({Balance:C})",
@@ -284,7 +285,7 @@ public class SignalExecutionHandler(
         TradeResult result;
         using (TradeMetrics.OrderLatencySeconds.NewTimer())
         {
-            result = await oanda.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, CancellationToken.None);
+            result = await broker.PlaceMarketOrderAsync(signal, stopLoss, takeProfit, units, CancellationToken.None);
         }
 
         await tradeHistory.InsertAsync(new TradeHistoryRecord

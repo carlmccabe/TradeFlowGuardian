@@ -10,7 +10,7 @@ public static class AccountManagementServiceExtensions
     /// <summary>
     /// Registers the OANDA account registry: Data Protection (keys in Redis so Api
     /// and Worker share them), the encrypted store (requires TradeFlowDbContext),
-    /// and the singleton active-account provider used by OandaClient.
+    /// and the singleton active-account provider used by OandaBrokerClient.
     /// </summary>
     /// <param name="hasPostgres">When false the store is skipped and the provider falls back to the Oanda config section.</param>
     public static IServiceCollection AddAccountManagement(

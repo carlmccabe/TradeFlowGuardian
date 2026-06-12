@@ -1,9 +1,10 @@
 using Microsoft.Extensions.Options;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 
-namespace TradeFlowGuardian.Infrastructure.Oanda;
+namespace TradeFlowGuardian.Infrastructure.Sizing;
 
 /// <summary>
 /// Mirrors the Pine Script Section 5 position sizing formula.
@@ -12,13 +13,13 @@ namespace TradeFlowGuardian.Infrastructure.Oanda;
 public class PositionSizer : IPositionSizer
 {
     private readonly RiskConfig _risk;
-    private readonly IOandaClient _oanda;
+    private readonly IBrokerClient _broker;
     private readonly IRiskSettingsRepository _riskRepo;
 
-    public PositionSizer(IOptions<RiskConfig> risk, IOandaClient oanda, IRiskSettingsRepository riskRepo)
+    public PositionSizer(IOptions<RiskConfig> risk, IBrokerClient broker, IRiskSettingsRepository riskRepo)
     {
         _risk    = risk.Value;
-        _oanda   = oanda;
+        _broker  = broker;
         _riskRepo = riskRepo;
     }
 
@@ -49,9 +50,10 @@ public class PositionSizer : IPositionSizer
         var raw = riskAmount / lossPerUnit;
 
         // Margin cap: no single trade may consume more than 28% of account margin.
-        // OANDA 30:1 → marginRate = 1/30. quoteToAud normalises JPY/USD/EUR → AUD.
+        // Leverage comes from the broker descriptor (OANDA AU 30:1 → marginRate = 1/30).
+        // quoteToAud normalises JPY/USD/EUR → AUD.
         const decimal marginUtilisationLimit = 0.28m;
-        const decimal marginRate = 1.0m / 30.0m;
+        var marginRate = 1.0m / _broker.Descriptor.Leverage;
         var marginCap = (signal.Price > 0)
             ? (accountBalance * marginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
             : _risk.MaxPositionUnits;
@@ -89,7 +91,7 @@ public class PositionSizer : IPositionSizer
     /// </summary>
     private async Task<decimal> GetRateAsync(string instrument, bool invert, CancellationToken ct)
     {
-        var live = await _oanda.GetMidPriceAsync(instrument, ct);
+        var live = await _broker.GetMidPriceAsync(instrument, ct);
         if (live is > 0)
             return invert ? (1.0m / live.Value) : live.Value;
 

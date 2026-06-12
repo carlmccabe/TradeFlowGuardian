@@ -305,3 +305,13 @@
 - Delete Railway `Oanda__*` env vars once the registry is confirmed seeded
 - True realised P&L in AUD for `/trades` endpoint
 - GitHub Actions CI/CD pipeline
+
+### 2026-06-12 (session 2)
+- **Broker abstraction seam** (`feature/broker-abstraction`) — OANDA is now one adapter behind a port; pure refactor, zero behavior change
+  - `IBrokerClient` port in `Core/Brokers/` (+ `BrokerDescriptor`, `BrokerTransaction`); `IOandaClient` deleted — signatures unchanged, all crossing types were already Core-owned
+  - `OandaClient` → `Infrastructure/Brokers/Oanda/OandaBrokerClient` (git mv, method bodies untouched); all v20 quirks (FOK, 5dp/3dp formatting, close ALL/NONE) stay inside the adapter
+  - Hardcoded 30:1 leverage moved from PositionSizer const into `OandaBrokerClient.Descriptor` ("oanda", 30m — API's reported 100:1 still ignored); PositionSizer moved to `Infrastructure/Sizing/`
+  - `GetTransactionsAsync` on the port for upcoming realised-P&L work; adapter throws NotImplementedException for now
+  - Migration `005_broker_column.sql` — additive `broker` discriminator on oanda_accounts (default 'oanda'), not yet read by code
+  - 6 new `OandaBrokerClientMappingTests` pin the exact outgoing OANDA wire requests (capturing HttpMessageHandler) — 67/67 passing
+  - `docs/BROKER_ABSTRACTION.md` — port surface, canonical EUR_USD instrument format, new-adapter checklist, deferred follow-ups

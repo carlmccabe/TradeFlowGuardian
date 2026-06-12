@@ -22,7 +22,7 @@ public class OandaAccount
 
 /// <summary>
 /// Decrypted credentials for the currently active account — resolved per call
-/// by OandaClient so an account switch takes effect without a restart.
+/// by OandaBrokerClient so an account switch takes effect without a restart.
 /// </summary>
 public sealed record ActiveOandaAccount(
     string AccountId,
