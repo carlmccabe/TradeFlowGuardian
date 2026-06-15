@@ -76,9 +76,11 @@ builder.Services.AddScoped<IPositionSizer, PositionSizer>();
 builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
 // ── Risk settings (EF / PostgreSQL) ──────────────────────────────────────────
+bool hasPostgres;
 {
     var pgCs = PostgresConnectionHelper.Normalize(builder.Configuration["Postgres:ConnectionString"]);
-    if (!string.IsNullOrWhiteSpace(pgCs))
+    hasPostgres = !string.IsNullOrWhiteSpace(pgCs);
+    if (hasPostgres)
     {
         builder.Services.AddDbContext<TradeFlowDbContext>(opts =>
             opts.UseNpgsql(pgCs));
@@ -93,7 +95,7 @@ builder.Services.AddScoped<ITradeHistoryRepository, TradeHistoryRepository>();
 
     // ── Account registry ──────────────────────────────────────────────────────
     // Same registry as the Api — guarantees both services trade the same account.
-    builder.Services.AddAccountManagement(redisMux, hasPostgres: !string.IsNullOrWhiteSpace(pgCs));
+    builder.Services.AddAccountManagement(redisMux, hasPostgres: hasPostgres);
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────
@@ -143,10 +145,11 @@ var host = builder.Build();
     {
         var activeAcct = await accountProvider.GetActiveAsync();
         startupLog.LogInformation(
-            "Worker starting | OANDA={OandaEnv} | Account={Label} ({AccountId}) | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | Consumer={Consumer} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter}",
+            "Worker starting | OANDA={OandaEnv} | Account={Label} ({AccountId}) | Url={BaseUrl} | Redis={Redis} | Stream={Stream} | Consumer={Consumer} | AtrFilter={AtrFilter} | NewsFilter={NewsFilter} | RiskSettings={RiskSettings}",
             activeAcct.Environment, activeAcct.Label, activeAcct.AccountId, activeAcct.BaseUrl,
             RedisHost(redisCfg.ConnectionString), redisCfg.StreamName, redisCfg.ConsumerName,
-            filterCfg.EnableAtrSpikeFilter, newsCfg.Enabled);
+            filterCfg.EnableAtrSpikeFilter, newsCfg.Enabled,
+            hasPostgres ? "db" : "noop(Postgres__ConnectionString not set)");
     }
     catch (Exception ex)
     {

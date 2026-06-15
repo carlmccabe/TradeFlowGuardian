@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Configuration;
@@ -15,12 +16,14 @@ public class PositionSizer : IPositionSizer
     private readonly RiskConfig _risk;
     private readonly IBrokerClient _broker;
     private readonly IRiskSettingsRepository _riskRepo;
+    private readonly ILogger<PositionSizer> _logger;
 
-    public PositionSizer(IOptions<RiskConfig> risk, IBrokerClient broker, IRiskSettingsRepository riskRepo)
+    public PositionSizer(IOptions<RiskConfig> risk, IBrokerClient broker, IRiskSettingsRepository riskRepo, ILogger<PositionSizer> logger)
     {
         _risk    = risk.Value;
         _broker  = broker;
         _riskRepo = riskRepo;
+        _logger  = logger;
     }
 
     public async Task<long> CalculateUnitsAsync(
@@ -33,6 +36,13 @@ public class PositionSizer : IPositionSizer
         var riskPct = signal.RiskPercent > 0
             ? signal.RiskPercent
             : dbSettings?.RiskPercent ?? _risk.DefaultRiskPercent;
+
+        var riskSource = signal.RiskPercent > 0 ? "signal-override"
+            : dbSettings is not null ? $"db({dbSettings.RiskPercent}%)"
+            : $"default({_risk.DefaultRiskPercent}%)";
+        _logger.LogInformation("Risk% for {Instrument}: {RiskPct}% [{Source}]",
+            signal.Instrument, riskPct, riskSource);
+
         var riskAmount = accountBalance * (riskPct / 100m);
 
         // Prefer actual SL distance from the webhook; fall back to ATR × multiplier
