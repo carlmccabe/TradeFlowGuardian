@@ -95,7 +95,7 @@ public class TradeHistoryRepository(
         ) c ON true
         WHERE e.direction IN ('Long', 'Short')
           AND e.success    = true
-          AND e.executed_at >= NOW() - (@Days || ' days')::INTERVAL
+          AND e.executed_at >= NOW() - INTERVAL '1 day' * @Days
         ORDER BY e.executed_at DESC
         """;
 
