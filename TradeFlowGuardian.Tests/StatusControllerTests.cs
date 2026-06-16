@@ -6,6 +6,7 @@ using Moq;
 using TradeFlowGuardian.Api.Controllers;
 using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
 using Xunit;
@@ -14,7 +15,7 @@ namespace TradeFlowGuardian.Tests;
 
 public class StatusControllerTests
 {
-    private readonly Mock<IOandaClient> _oandaMock;
+    private readonly Mock<IBrokerClient> _oandaMock;
     private readonly Mock<IPauseState> _pauseStateMock;
     private readonly Mock<IDailyDrawdownGuard> _drawdownGuardMock;
     private readonly Mock<ITradeHistoryRepository> _tradeHistoryMock;
@@ -24,7 +25,7 @@ public class StatusControllerTests
 
     public StatusControllerTests()
     {
-        _oandaMock = new Mock<IOandaClient>();
+        _oandaMock = new Mock<IBrokerClient>();
         _pauseStateMock = new Mock<IPauseState>();
         _drawdownGuardMock = new Mock<IDailyDrawdownGuard>();
         _tradeHistoryMock = new Mock<ITradeHistoryRepository>();

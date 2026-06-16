@@ -103,7 +103,9 @@ export function buildWeekGroups(trades: { openedAt: string; pnlQuote: number }[]
       }
     })
 
-    const label = w === 0 ? 'This week' : weekStart.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' })
+    const monday = new Date(weekStart)
+    monday.setUTCDate(weekStart.getUTCDate() + 1)
+    const label = w === 0 ? 'This week' : monday.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' })
     weeks.push({ weekLabel: label, days, total: days.reduce((s, d) => s + d.pnl, 0) })
   }
 

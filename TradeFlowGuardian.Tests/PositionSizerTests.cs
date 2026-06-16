@@ -2,9 +2,10 @@ using Microsoft.Extensions.Options;
 using Moq;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Enums;
+using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
-using TradeFlowGuardian.Infrastructure.Oanda;
+using TradeFlowGuardian.Infrastructure.Sizing;
 using Xunit;
 
 namespace TradeFlowGuardian.Tests;
@@ -14,7 +15,7 @@ public class PositionSizerTests
     // ── shared fixture helpers ────────────────────────────────────────────────
 
     private static PositionSizer BuildSizer(
-        Mock<IOandaClient> oandaMock,
+        Mock<IBrokerClient> oandaMock,
         decimal defaultRiskPct = 1.0m,
         decimal atrStopMultiplier = 2.0m,
         decimal maxPositionUnits = 1_000_000m)
@@ -30,12 +31,13 @@ public class PositionSizerTests
         var riskRepo = new Mock<IRiskSettingsRepository>();
         riskRepo.Setup(r => r.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TradeFlowGuardian.Core.Models.RiskSettings?)null);
+        oandaMock.SetupGet(c => c.Descriptor).Returns(new BrokerDescriptor("oanda", 30m));
         return new PositionSizer(risk, oandaMock.Object, riskRepo.Object);
     }
 
-    private static Mock<IOandaClient> OandaWithAudJpy(decimal audJpy)
+    private static Mock<IBrokerClient> OandaWithAudJpy(decimal audJpy)
     {
-        var mock = new Mock<IOandaClient>();
+        var mock = new Mock<IBrokerClient>();
         mock.Setup(c => c.GetMidPriceAsync("AUD_JPY", It.IsAny<CancellationToken>()))
             .ReturnsAsync(audJpy);
         return mock;

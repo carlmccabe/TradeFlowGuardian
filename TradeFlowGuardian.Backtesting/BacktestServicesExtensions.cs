@@ -21,7 +21,7 @@ public static class BacktestServicesExtensions
     ///
     /// Requires these config keys to already exist:
     ///   Postgres:ConnectionString  — shared with the live trade history repository
-    ///   Oanda:ApiKey / AccountId / Environment — shared with OandaClient
+    ///   Oanda:ApiKey / AccountId / Environment — shared with OandaBrokerClient
     /// </summary>
     public static IServiceCollection AddBacktestServices(
         this IServiceCollection services,
