@@ -62,6 +62,11 @@ public class ExecutionWorker : BackgroundService
             if (signal is null)
                 continue;
 
+            _logger.LogInformation(
+                "Dequeued signal: {Direction} {Instrument} | Key={Key} | Age={AgeMs}ms",
+                signal.Direction, signal.Instrument, signal.IdempotencyKey,
+                (long)(DateTimeOffset.UtcNow - signal.Timestamp).TotalMilliseconds);
+
             // Update queue depth gauge — uses XPENDING (actual backlog) not XLEN (total history)
             try
             {

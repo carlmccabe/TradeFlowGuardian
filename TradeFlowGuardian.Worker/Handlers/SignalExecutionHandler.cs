@@ -64,12 +64,17 @@ public class SignalExecutionHandler(
 
     private async Task ProcessSignalInternalAsync(TradeSignal signal, CancellationToken ct)
     {
+        logger.LogInformation(
+            "Processing signal: {Direction} {Instrument} | Price={Price} ATR={Atr} SL={SL} TP={TP} riskPercent={RiskPct} | Key={Key}",
+            signal.Direction, signal.Instrument, signal.Price, signal.Atr,
+            signal.StopLoss, signal.TakeProfit, signal.RiskPercent, signal.IdempotencyKey);
+
         // ── Idempotency check ─────────────────────────────────────────────────
         if (signal.IdempotencyKey is not null)
         {
             var key = $"idempotency:signal:{signal.IdempotencyKey}";
             // Set with 24h TTL if it doesn't exist
-            try 
+            try
             {
                 var set = await _db.StringSetAsync(key, (RedisValue)"1", TimeSpan.FromHours(24), When.NotExists);
                 if (!set)
@@ -77,6 +82,7 @@ public class SignalExecutionHandler(
                     logger.LogWarning("Duplicate signal ignored: {Key}", signal.IdempotencyKey);
                     return;
                 }
+                logger.LogInformation("Idempotency check passed: {Key}", signal.IdempotencyKey);
             }
             catch (Exception ex)
             {
@@ -132,19 +138,32 @@ public class SignalExecutionHandler(
         var filterResult = await filter.EvaluateAsync(signal, ct);
         if (!filterResult.Allowed)
         {
-            logger.LogWarning("Signal for {Instrument} blocked by filter. Reason: {Reason}",
-                signal.Instrument, filterResult.Reason);
+            logger.LogWarning("Signal for {Instrument} BLOCKED by filter [{Label}]: {Reason}",
+                signal.Instrument, filterResult.Label, filterResult.Reason);
             TradeMetrics.SignalsFiltered.WithLabels(filterResult.Label).Inc();
             return;
         }
+        logger.LogInformation("Filters passed for {Instrument}", signal.Instrument);
 
         // ── IsActive check — DB risk settings ────────────────────────────────
         var riskSettings = await riskRepo.GetByInstrumentAsync(signal.Instrument, ct);
-        if (riskSettings is { IsActive: false })
+        if (riskSettings is null)
         {
-            logger.LogWarning("Signal for {Instrument} blocked: instrument is inactive in risk settings", signal.Instrument);
+            logger.LogWarning(
+                "Risk settings unavailable for {Instrument} (DB returned null — Postgres may not be connected). " +
+                "IsActive check skipped; proceeding with signal.",
+                signal.Instrument);
+        }
+        else if (!riskSettings.IsActive)
+        {
+            logger.LogWarning("Signal for {Instrument} BLOCKED: instrument is inactive in risk settings", signal.Instrument);
             TradeMetrics.SignalsFiltered.WithLabels("instrument_inactive").Inc();
             return;
+        }
+        else
+        {
+            logger.LogInformation("Risk settings OK for {Instrument}: isActive=true riskPct={RiskPct}%",
+                signal.Instrument, riskSettings.RiskPercent);
         }
 
         // ── No pyramiding — check for existing position (cache → OANDA fallback) ──
@@ -153,7 +172,7 @@ public class SignalExecutionHandler(
         if (cached)
         {
             existingUnits = cachedUnits;
-            logger.LogDebug("Position cache hit for {Instrument}: {Units} units", signal.Instrument, cachedUnits);
+            logger.LogInformation("Position cache hit for {Instrument}: {Units} units", signal.Instrument, cachedUnits);
         }
         else
         {
@@ -165,10 +184,11 @@ public class SignalExecutionHandler(
         if (existingUnits is not null)
         {
             logger.LogWarning(
-                "Signal skipped: Position already open on {Instrument} ({Units} units). No pyramiding allowed.",
+                "Signal SKIPPED: Position already open on {Instrument} ({Units} units). No pyramiding.",
                 signal.Instrument, existingUnits);
             return;
         }
+        logger.LogInformation("No open position on {Instrument} — proceeding to size order", signal.Instrument);
 
         // ── Position sizing ───────────────────────────────────────────────────
         var balance = await broker.GetAccountBalanceAsync(ct);
@@ -178,6 +198,7 @@ public class SignalExecutionHandler(
                 signal.Instrument, balance);
             return;
         }
+        logger.LogInformation("Account balance: {Balance:C} AUD", balance);
 
         TradeMetrics.AccountBalance.Set((double)balance);
 
@@ -217,7 +238,7 @@ public class SignalExecutionHandler(
             // Price is optional in this path; a signal with price=0 is valid.
             stopLoss   = signal.StopLoss;
             takeProfit = signal.TakeProfit;
-            logger.LogDebug("Using pre-calculated SL/TP for {Instrument}: SL={SL} TP={TP}",
+            logger.LogInformation("SL/TP from signal: {Instrument} SL={SL} TP={TP}",
                 signal.Instrument, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
         }
         else
@@ -232,8 +253,9 @@ public class SignalExecutionHandler(
                 return;
             }
 
-            logger.LogDebug("Calculating SL/TP from ATR for {Instrument}: Price={Price} ATR={Atr}",
-                signal.Instrument, signal.Price.ToString(priceFmt), signal.Atr);
+            logger.LogInformation("SL/TP calculated from ATR: {Instrument} Price={Price} ATR={Atr} stop×{StopMult} target×{TargetMult}",
+                signal.Instrument, signal.Price.ToString(priceFmt), signal.Atr,
+                _risk.AtrStopMultiplier, _risk.AtrTargetMultiplier);
 
             var stopDistance   = signal.Atr * _risk.AtrStopMultiplier;
             var targetDistance = signal.Atr * _risk.AtrTargetMultiplier;
