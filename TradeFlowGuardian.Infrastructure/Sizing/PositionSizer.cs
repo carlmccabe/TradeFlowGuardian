@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Configuration;
@@ -15,12 +16,14 @@ public class PositionSizer : IPositionSizer
     private readonly RiskConfig _risk;
     private readonly IBrokerClient _broker;
     private readonly IRiskSettingsRepository _riskRepo;
+    private readonly ILogger<PositionSizer> _logger;
 
-    public PositionSizer(IOptions<RiskConfig> risk, IBrokerClient broker, IRiskSettingsRepository riskRepo)
+    public PositionSizer(IOptions<RiskConfig> risk, IBrokerClient broker, IRiskSettingsRepository riskRepo, ILogger<PositionSizer> logger)
     {
-        _risk    = risk.Value;
-        _broker  = broker;
+        _risk     = risk.Value;
+        _broker   = broker;
         _riskRepo = riskRepo;
+        _logger   = logger;
     }
 
     public async Task<long> CalculateUnitsAsync(
@@ -30,22 +33,45 @@ public class PositionSizer : IPositionSizer
     {
         // DB lookup takes priority; signal override applies only when explicitly > 0
         var dbSettings = await _riskRepo.GetByInstrumentAsync(signal.Instrument, ct);
-        var riskPct = signal.RiskPercent > 0
-            ? signal.RiskPercent
-            : dbSettings?.RiskPercent ?? _risk.DefaultRiskPercent;
+
+        string riskSource;
+        decimal riskPct;
+        if (signal.RiskPercent > 0)
+        {
+            riskPct    = signal.RiskPercent;
+            riskSource = "signal-override";
+        }
+        else if (dbSettings?.RiskPercent is { } dbPct)
+        {
+            riskPct    = dbPct;
+            riskSource = "db";
+        }
+        else
+        {
+            riskPct    = _risk.DefaultRiskPercent;
+            riskSource = dbSettings is null ? "config-default(db-null)" : "config-default";
+        }
+
         var riskAmount = accountBalance * (riskPct / 100m);
 
         // Prefer actual SL distance from the webhook; fall back to ATR × multiplier
-        var stopDistance = (signal.StopLoss > 0 && signal.Price > 0)
+        bool usingSl = signal.StopLoss > 0 && signal.Price > 0;
+        var stopDistance = usingSl
             ? Math.Abs(signal.Price - signal.StopLoss)
             : signal.Atr * _risk.AtrStopMultiplier;
+        var stopSource = usingSl ? "signal-sl" : $"atr×{_risk.AtrStopMultiplier}";
 
         var quoteToAud = await GetQuoteToAudAsync(signal.Instrument, ct);
 
         var lossPerUnit = stopDistance * quoteToAud;
 
         if (lossPerUnit <= 0)
+        {
+            _logger.LogError(
+                "Sizing aborted for {Instrument}: lossPerUnit={LossPerUnit} (stopDistance={StopDist}, quoteToAud={QuoteToAud})",
+                signal.Instrument, lossPerUnit, stopDistance, quoteToAud);
             return 0;
+        }
 
         var raw = riskAmount / lossPerUnit;
 
@@ -59,7 +85,18 @@ public class PositionSizer : IPositionSizer
             : _risk.MaxPositionUnits;
 
         var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
-        return (long)Math.Round(capped);
+        var units  = (long)Math.Round(capped);
+
+        _logger.LogInformation(
+            "Sizing {Instrument} {Direction} | riskSource={RiskSource} riskPct={RiskPct}% riskAmount={RiskAmount:F2} AUD | " +
+            "stopSource={StopSource} stopDist={StopDist} quoteToAud={QuoteToAud:F4} lossPerUnit={LossPerUnit:F6} | " +
+            "raw={Raw:F0} marginCap={MarginCap:F0} units={Units}",
+            signal.Instrument, signal.Direction,
+            riskSource, riskPct, riskAmount,
+            stopSource, stopDistance, quoteToAud, lossPerUnit,
+            raw, marginCap, units);
+
+        return units;
     }
 
     /// <summary>
