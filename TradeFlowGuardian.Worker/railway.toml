@@ -9,7 +9,7 @@
 
 [build]
 dockerfilePath = "TradeFlowGuardian.Worker/Dockerfile"
-buildContext = "."
+buildContext = ".."
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

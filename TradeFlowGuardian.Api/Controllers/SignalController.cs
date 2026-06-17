@@ -39,8 +39,9 @@ public class SignalController(ISignalQueue queue, ILogger<SignalController> logg
         signal.Timestamp = DateTimeOffset.UtcNow;
 
         logger.LogInformation(
-            "Signal received: {Direction} {Instrument} @ {Price} | ATR={Atr} | Key={Key}",
-            signal.Direction, signal.Instrument, signal.Price, signal.Atr, signal.IdempotencyKey);
+            "Signal received: {Direction} {Instrument} @ {Price} | ATR={Atr} | SL={StopLoss} | TP={TakeProfit} | riskPercent={RiskPercent} | Key={Key}",
+            signal.Direction, signal.Instrument, signal.Price, signal.Atr,
+            signal.StopLoss, signal.TakeProfit, signal.RiskPercent, signal.IdempotencyKey);
 
         await queue.EnqueueAsync(signal, ct);
 

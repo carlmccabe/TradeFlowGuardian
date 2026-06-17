@@ -191,6 +191,18 @@ var app = builder.Build();
     var migrationCheckCs = PostgresConnectionHelper.Normalize(builder.Configuration["Postgres:ConnectionString"]);
     if (!string.IsNullOrWhiteSpace(migrationCheckCs))
         _ = Task.Run(() => MigrationCli.WarnIfPendingAsync(migrationCheckCs, startupLog));
+
+    // ── Postgres probe ────────────────────────────────────────────────────────
+    await using (var scope = app.Services.CreateAsyncScope())
+    {
+        var repo = scope.ServiceProvider.GetRequiredService<ITradeHistoryRepository>();
+        var (reachable, rowCount, error) = await repo.GetStatusAsync(CancellationToken.None);
+        if (reachable)
+            startupLog.LogInformation("Postgres: connected | trade_history rows={RowCount}", rowCount);
+        else
+            startupLog.LogWarning("Postgres: unreachable or not configured | {Error}",
+                error ?? "connection string empty");
+    }
 }
 
 if (app.Environment.IsDevelopment())
