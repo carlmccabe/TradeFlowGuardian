@@ -197,6 +197,21 @@
   shows example payload, explains why `alert()` must own the body
 - No changes to C# execution logic, risk calculations, or field definitions
 
+### 2026-05-06 — Staging environment setup
+- Created `develop` branch from `main` as the staging deployment source
+- Updated `docs/DEPLOYMENT.md`:
+  - Platform diagram now shows both environments with isolated plugins
+  - New "Environments & Branching" section covering:
+    - `main` → production, `develop` → staging branch mapping
+    - Step-by-step Railway dashboard instructions to set branch per service per environment
+    - Service isolation verification steps (Redis + Postgres hostname check)
+    - Per-environment env var diff table (ASPNETCORE_ENVIRONMENT, ENVIRONMENT, Webhook__Secret, connection strings)
+    - Staging → production promotion workflow (PR `develop` → `main`)
+    - Per-environment migration instructions via Railway CLI
+  - Added `ENVIRONMENT=production/staging` plain tag var to both service env var tables
+  - Added `ASPNETCORE_ENVIRONMENT`, `DOTNET_ENVIRONMENT`, `ENVIRONMENT` rows to complete reference table
+- `railway.toml` files intentionally not changed — branch selection is a Railway dashboard setting only
+
 ### 2026-06-03 — Stage 2 dashboard + risk settings DB
 
 **Risk settings**
