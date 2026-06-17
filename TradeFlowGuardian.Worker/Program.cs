@@ -153,6 +153,18 @@ var host = builder.Build();
         startupLog.LogCritical(ex,
             "Worker starting but NO active OANDA account found — trades will fail until an account is activated via /api/accounts");
     }
+
+    // ── Postgres probe ────────────────────────────────────────────────────────
+    {
+        await using var scope = host.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<ITradeHistoryRepository>();
+        var (reachable, rowCount, error) = await repo.GetStatusAsync(CancellationToken.None);
+        if (reachable)
+            startupLog.LogInformation("Postgres: connected | trade_history rows={RowCount}", rowCount);
+        else
+            startupLog.LogWarning("Postgres: unreachable or not configured | {Error}",
+                error ?? "connection string empty");
+    }
 }
 
 host.Run();
