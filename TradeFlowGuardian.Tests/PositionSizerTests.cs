@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using TradeFlowGuardian.Core.Configuration;
@@ -32,7 +33,7 @@ public class PositionSizerTests
         riskRepo.Setup(r => r.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((TradeFlowGuardian.Core.Models.RiskSettings?)null);
         oandaMock.SetupGet(c => c.Descriptor).Returns(new BrokerDescriptor("oanda", 30m));
-        return new PositionSizer(risk, oandaMock.Object, riskRepo.Object);
+        return new PositionSizer(risk, oandaMock.Object, riskRepo.Object, NullLogger<PositionSizer>.Instance);
     }
 
     private static Mock<IBrokerClient> OandaWithAudJpy(decimal audJpy)
