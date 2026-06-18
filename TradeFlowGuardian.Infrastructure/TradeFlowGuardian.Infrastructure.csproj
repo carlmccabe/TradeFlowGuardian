@@ -12,7 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Domain\TradeFlowGuardian.Domain.csproj" />
-    <ProjectReference Include="..\TradeFlowGuardian.Strategies\TradeFlowGuardian.Strategies.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.35" />
