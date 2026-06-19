@@ -120,4 +120,62 @@ public class TradeHistoryRepository(
         }
     }
 
+    // Daily P&L: pairs each Long/Short entry with its next Close fill, groups by UTC day or ISO week.
+    // Units are always positive in the DB (sizer returns positive; OandaBrokerClient negates for shorts).
+    private static readonly string DailyPnlSqlDay = BuildDailyPnlSql("day");
+    private static readonly string DailyPnlSqlWeek = BuildDailyPnlSql("week");
+
+    private static string BuildDailyPnlSql(string bucket) => $"""
+        SELECT
+            TO_CHAR(DATE_TRUNC('{bucket}', e.executed_at), 'YYYY-MM-DD') AS "Date",
+            SUM(
+                CASE e.direction
+                    WHEN 'Long'  THEN (c.fill_price - e.fill_price) * e.units
+                    WHEN 'Short' THEN (e.fill_price - c.fill_price) * e.units
+                    ELSE 0
+                END
+            )::float AS "Pnl",
+            COUNT(*)::int AS "TradeCount"
+        FROM trade_history e
+        JOIN LATERAL (
+            SELECT fill_price
+            FROM trade_history c2
+            WHERE c2.instrument  = e.instrument
+              AND c2.direction   = 'Close'
+              AND c2.executed_at > e.executed_at
+              AND c2.success     = true
+              AND c2.fill_price IS NOT NULL
+            ORDER BY c2.executed_at
+            LIMIT 1
+        ) c ON true
+        WHERE e.direction IN ('Long', 'Short')
+          AND e.success     = true
+          AND e.fill_price IS NOT NULL
+          AND e.executed_at >= NOW() - INTERVAL '1 day' * @Days
+        GROUP BY 1
+        ORDER BY 1 ASC
+        """;
+
+    public async Task<IReadOnlyList<TradeFlowGuardian.Core.Models.DailyPnlRecord>> GetDailyPnlAsync(
+        bool weekly = false, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            return [];
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(ct);
+            var sql  = weekly ? DailyPnlSqlWeek : DailyPnlSqlDay;
+            var days = weekly ? 91 : 30;
+            var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.DailyPnlRecord>(sql, new { Days = days });
+            return rows.ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to query daily P&L records");
+            return [];
+        }
+    }
+
 }

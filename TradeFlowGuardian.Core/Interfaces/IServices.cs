@@ -80,6 +80,13 @@ public interface ITradeHistoryRepository
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
     Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
     Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(int days = 90, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns realized P&amp;L grouped by UTC day (weekly=false, 30 days) or ISO week (weekly=true, 90 days).
+    /// Only includes closed trades (entry paired with a subsequent Close fill).
+    /// Never throws — returns empty list on DB error.
+    /// </summary>
+    Task<IReadOnlyList<DailyPnlRecord>> GetDailyPnlAsync(bool weekly = false, CancellationToken ct = default);
 }
 
 /// <summary>
