@@ -81,6 +81,24 @@ public class StatusController(
     }
 
     /// <summary>
+    /// Realized P&amp;L grouped by UTC day (range=daily, 30 days) or ISO week (range=weekly, 13 weeks).
+    /// Each bucket includes only fully-closed trades (entry fill paired with a Close fill).
+    /// Returns an empty array when there is no matching trade history — never an error.
+    /// </summary>
+    [HttpGet("pnl")]
+    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "daily", CancellationToken ct = default)
+    {
+        var weekly = "weekly".Equals(range, StringComparison.OrdinalIgnoreCase);
+        var data   = await tradeHistory.GetDailyPnlAsync(weekly, ct);
+        return Ok(data.Select(d => new
+        {
+            date       = d.Date,
+            pnl        = d.Pnl,
+            tradeCount = d.TradeCount,
+        }));
+    }
+
+    /// <summary>
     /// Sets or clears the global pause flag. When paused, all new Long/Short entries
     /// are blocked in the Worker until explicitly resumed.
     /// </summary>
