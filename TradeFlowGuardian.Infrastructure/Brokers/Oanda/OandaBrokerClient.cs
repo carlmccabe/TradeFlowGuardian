@@ -411,11 +411,64 @@ public class OandaBrokerClient : IBrokerClient
     }
 
     /// <summary>
-    /// Not yet implemented — part of the broker port ahead of realised-P&amp;L work.
-    /// TODO: implement via GET /v3/accounts/{id}/transactions (sinceid/daterange paging).
+    /// Fetches closed trades from OANDA and returns those whose closeTime falls in [from, to].
+    /// Uses GET /v3/accounts/{id}/trades?state=CLOSED&amp;count=500.
+    /// RealizedPL is in account currency as reported by OANDA. Returns empty list on error.
     /// </summary>
-    public Task<IReadOnlyList<BrokerTransaction>> GetTransactionsAsync(
+    public async Task<IReadOnlyList<BrokerTransaction>> GetTransactionsAsync(
         DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "TODO: realised P&L — OANDA /v3/accounts/{id}/transactions");
+    {
+        try
+        {
+            var acct = await _accounts.GetActiveAsync(ct);
+            // OANDA /trades does not support date-range filtering; fetch last 500 closed
+            // trades (the API maximum) and filter by closeTime in memory.
+            var url = $"/v3/accounts/{acct.AccountId}/trades?state=CLOSED&count=500";
+            var response = await SendAsync(HttpMethod.Get, acct, url, null, ct);
+            response.EnsureSuccessStatusCode();
+
+            var body      = await response.Content.ReadAsStringAsync(ct);
+            var node      = JsonNode.Parse(body);
+            var tradesArr = node?["trades"]?.AsArray();
+            if (tradesArr is null) return [];
+
+            var result = new List<BrokerTransaction>();
+            foreach (var trade in tradesArr)
+            {
+                if (trade is null) continue;
+
+                var closeTimeStr = trade["closeTime"]?.ToString();
+                if (!DateTimeOffset.TryParse(closeTimeStr, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var closeTime))
+                    continue;
+
+                if (closeTime < from || closeTime > to) continue;
+
+                decimal.TryParse(trade["initialUnits"]?.ToString(),
+                    System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var units);
+                decimal.TryParse(trade["price"]?.ToString(),
+                    System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var price);
+                decimal.TryParse(trade["realizedPL"]?.ToString(),
+                    System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var pl);
+
+                result.Add(new BrokerTransaction(
+                    Id:         trade["id"]?.ToString() ?? "?",
+                    Type:       "TRADE_CLOSE",
+                    Instrument: trade["instrument"]?.ToString(),
+                    Units:      units,
+                    Price:      price,
+                    RealizedPL: pl,
+                    Timestamp:  closeTime));
+            }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch closed trade history from OANDA");
+            return [];
+        }
+    }
 }

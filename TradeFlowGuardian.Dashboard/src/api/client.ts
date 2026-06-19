@@ -76,6 +76,15 @@ export interface DailyPnlRecord {
   tradeCount: number
 }
 
+export interface OandaTradeRecord {
+  id: string
+  instrument: string | null
+  units: number       // positive = long, negative = short
+  entryPrice: number
+  realizedPL: number  // in account currency (AUD)
+  closedAt: string    // ISO timestamp
+}
+
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 export interface AccountResponse {
@@ -152,6 +161,9 @@ export const api = {
 
   getPnl: (range: 'daily' | 'weekly') =>
     request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
+
+  getOandaTrades: (days = 30) =>
+    request<OandaTradeRecord[]>(`/status/history?days=${days}`),
 
   closePosition: (instrument: string) =>
     request<void>(`/status/close/${instrument}`, { method: 'POST' }),
