@@ -70,6 +70,12 @@ export interface TradeRecord {
   durationSeconds: number | null
 }
 
+export interface DailyPnlRecord {
+  date: string        // "YYYY-MM-DD" (daily = that day, weekly = Monday of the week)
+  pnl: number
+  tradeCount: number
+}
+
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 export interface AccountResponse {
@@ -143,6 +149,9 @@ export const api = {
   getFilterStatus: () => request<FilterStatusResponse>('/status/filters'),
 
   getTrades: () => request<TradeRecord[]>('/status/trades'),
+
+  getPnl: (range: 'daily' | 'weekly') =>
+    request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
 
   closePosition: (instrument: string) =>
     request<void>(`/status/close/${instrument}`, { method: 'POST' }),

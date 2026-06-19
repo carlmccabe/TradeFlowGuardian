@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useState } from 'react'
 import { api, type TradeRecord } from '../api/client'
 import { usePolling } from '../hooks/usePolling'
-import { PnlChart, buildWeekGroups } from './PnlChart'
+import { PnlChart } from './PnlChart'
 import { TradeList } from './TradeList'
+
+type Range = 'daily' | 'weekly'
 
 function computePnlQuote(t: TradeRecord): number | null {
   if (t.exitPrice === null) return null
@@ -13,39 +15,28 @@ function computePnlQuote(t: TradeRecord): number | null {
 }
 
 export function PnlTab() {
-  const fetcher = useCallback(() => api.getTrades(), [])
-  const { data, error, loading } = usePolling(fetcher, 60_000)
-  const [selectedWeek, setSelectedWeek] = useState(0)
+  const [range, setRange] = useState<Range>('daily')
+
+  const pnlFetcher  = useCallback(() => api.getPnl(range), [range])
+  const tradeFetcher = useCallback(() => api.getTrades(), [])
+
+  const { data: pnlData, error: pnlError, loading: pnlLoading } = usePolling(pnlFetcher, 60_000)
+  const { data: trades }                                         = usePolling(tradeFetcher, 60_000)
 
   const enriched = useMemo(() => {
-    if (!data) return []
-    return data.map(t => ({ ...t, pnlQuote: computePnlQuote(t) }))
-  }, [data])
+    if (!trades) return []
+    return trades.map(t => ({ ...t, pnlQuote: computePnlQuote(t) }))
+  }, [trades])
 
-  const weeks = useMemo(() =>
-    buildWeekGroups(enriched.map(t => ({
-      openedAt: t.openedAt,
-      pnlQuote: t.pnlQuote ?? 0,
-    }))),
-    [enriched]
-  )
-
-  // Filter trades for selected week
-  const weekTrades = useMemo(() => {
-    if (weeks.length === 0) return []
-    const dates = new Set(weeks[selectedWeek].days.map(d => d.date))
-    return enriched.filter(t => dates.has(t.openedAt.slice(0, 10)))
-  }, [enriched, weeks, selectedWeek])
-
-  // Per-pair breakdown for selected week
+  // Per-pair breakdown across all closed trades
   const breakdown = useMemo(() => {
     const map: Record<string, { count: number; pnl: number; wins: number }> = {}
-    weekTrades.forEach(t => {
+    enriched.forEach(t => {
+      if (t.pnlQuote === null) return
       if (!map[t.instrument]) map[t.instrument] = { count: 0, pnl: 0, wins: 0 }
       map[t.instrument].count++
-      const pnl = t.pnlQuote ?? 0
-      map[t.instrument].pnl += pnl
-      if (pnl > 0) map[t.instrument].wins++
+      map[t.instrument].pnl += t.pnlQuote
+      if (t.pnlQuote > 0) map[t.instrument].wins++
     })
     return Object.entries(map).map(([instrument, v]) => ({
       instrument,
@@ -53,26 +44,70 @@ export function PnlTab() {
       totalPnl: Math.round(v.pnl * 100) / 100,
       winRate: v.count > 0 ? Math.round((v.wins / v.count) * 100) : 0,
     }))
-  }, [weekTrades])
+  }, [enriched])
 
-  if (loading) return <p className="text-sm text-gray-500 animate-pulse">Loading trades…</p>
-  if (error)   return <p className="text-sm text-red-400">{error}</p>
+  const totalPnl = useMemo(
+    () => pnlData?.reduce((s, d) => s + d.pnl, 0) ?? 0,
+    [pnlData]
+  )
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Weekly P&L chart — selectable */}
+
+      {/* Chart + toggle */}
       <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
-        <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-4">
-          Weekly P&amp;L
-        </p>
-        <PnlChart weeks={weeks} selectedWeek={selectedWeek} onSelectWeek={setSelectedWeek} />
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-widest text-gray-500">
+              Realized P&amp;L
+            </p>
+            {pnlData && (
+              <p className={`text-lg font-mono font-semibold mt-0.5 ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}
+              </p>
+            )}
+          </div>
+          <div className="flex bg-gray-800 rounded-lg p-1 gap-1">
+            {(['daily', 'weekly'] as Range[]).map(r => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                  range === r
+                    ? 'bg-gray-700 text-emerald-400'
+                    : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {r.charAt(0).toUpperCase() + r.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {pnlLoading && <p className="text-sm text-gray-500 animate-pulse">Loading…</p>}
+        {pnlError   && <p className="text-sm text-red-400">{pnlError}</p>}
+        {pnlData    && <PnlChart bars={pnlData} weekly={range === 'weekly'} />}
+
+        {pnlData && range === 'weekly' && pnlData.length > 0 && (
+          <div className="flex justify-between mt-2">
+            {pnlData.map(bar => {
+              const d = new Date(bar.date + 'T00:00:00Z')
+              const label = d.toLocaleDateString('en-AU', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+              return (
+                <span key={bar.date} className="text-[10px] text-gray-600 flex-1 text-center">
+                  {label}
+                </span>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Per-pair breakdown */}
       {breakdown.length > 0 && (
         <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
           <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-3">
-            {weeks[selectedWeek]?.weekLabel ?? 'This week'} — breakdown
+            By instrument
           </p>
           <div className="flex flex-col gap-2">
             {breakdown.map(b => (
@@ -94,10 +129,10 @@ export function PnlTab() {
       {/* Trade list */}
       <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
         <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-3">
-          Trades — {weeks[selectedWeek]?.weekLabel ?? 'This week'}
+          Closed trades
         </p>
         <p className="text-xs text-gray-600 mb-3">P&amp;L shown in quote currency (approximate)</p>
-        <TradeList trades={weekTrades} />
+        <TradeList trades={enriched.filter(t => t.exitPrice !== null)} />
       </div>
     </div>
   )
