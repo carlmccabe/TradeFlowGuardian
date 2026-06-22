@@ -180,6 +180,31 @@ public class StatusController(
     }
 
     /// <summary>
+    /// Returns closed trade history pulled directly from OANDA (not the local DB).
+    /// RealizedPL is in account currency (AUD) as reported by OANDA.
+    /// Returns an empty array when OANDA is unreachable or the account has no closed trades
+    /// in the requested window — never throws.
+    /// </summary>
+    [HttpGet("history")]
+    public async Task<IActionResult> GetOandaHistory([FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        var from   = DateTimeOffset.UtcNow.AddDays(-days);
+        var to     = DateTimeOffset.UtcNow;
+        var trades = await broker.GetTransactionsAsync(from, to, ct);
+        return Ok(trades.Select(t => new
+        {
+            id         = t.Id,
+            instrument = t.Instrument,
+            units      = t.Units,
+            entryPrice = t.Price,
+            closePrice = t.ClosePrice,
+            realizedPL = t.RealizedPL,
+            openedAt   = t.OpenedAt,
+            closedAt   = t.Timestamp,
+        }));
+    }
+
+    /// <summary>
     /// Checks the PostgreSQL trade history connection from inside the running service.
     /// Returns reachable status, total row count, and any error message.
     /// Safe to call at any time — read-only, never throws.
