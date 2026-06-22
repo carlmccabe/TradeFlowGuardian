@@ -5,6 +5,14 @@ import { PnlChart } from './PnlChart'
 
 type Range = 'daily' | 'weekly'
 
+function formatDuration(openedAt: string, closedAt: string): string {
+  const secs = Math.round((new Date(closedAt).getTime() - new Date(openedAt).getTime()) / 1000)
+  if (secs < 60)   return `${secs}s`
+  if (secs < 3600) return `${Math.round(secs / 60)}m`
+  if (secs < 86400) return `${(secs / 3600).toFixed(1)}h`
+  return `${Math.round(secs / 86400)}d`
+}
+
 // Groups OANDA closed trades by UTC day or ISO week (Monday), returning chart bars.
 function groupByDate(trades: OandaTradeRecord[], weekly: boolean): DailyPnlRecord[] {
   const map = new Map<string, { pnl: number; count: number }>()
@@ -178,15 +186,16 @@ export function PnlTab() {
                 </div>
                 <div className="flex items-center gap-4 text-right flex-shrink-0">
                   <div className="hidden sm:block">
-                    <p className="text-xs text-gray-500">Entry</p>
-                    <p className="font-mono text-gray-300">
+                    <p className="text-xs text-gray-500">Entry → Close</p>
+                    <p className="font-mono text-gray-300 text-xs">
                       {t.entryPrice.toFixed(t.entryPrice > 10 ? 3 : 5)}
+                      {t.closePrice > 0 && ` → ${t.closePrice.toFixed(t.closePrice > 10 ? 3 : 5)}`}
                     </p>
                   </div>
                   <div className="hidden sm:block">
-                    <p className="text-xs text-gray-500">Closed</p>
+                    <p className="text-xs text-gray-500">Duration</p>
                     <p className="font-mono text-gray-300 text-xs">
-                      {new Date(t.closedAt).toLocaleDateString('en-AU', { month: 'short', day: 'numeric' })}
+                      {formatDuration(t.openedAt, t.closedAt)}
                     </p>
                   </div>
                   <div>

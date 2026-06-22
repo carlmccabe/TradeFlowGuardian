@@ -79,10 +79,12 @@ export interface DailyPnlRecord {
 export interface OandaTradeRecord {
   id: string
   instrument: string | null
-  units: number       // positive = long, negative = short
+  units: number        // positive = long, negative = short (OANDA initialUnits)
   entryPrice: number
-  realizedPL: number  // in account currency (AUD)
-  closedAt: string    // ISO timestamp
+  closePrice: number   // averageClosePrice from OANDA (0 if unavailable)
+  realizedPL: number   // in account currency (AUD), net of commission & financing
+  openedAt: string     // ISO timestamp — when the position was opened
+  closedAt: string     // ISO timestamp — when the position was closed
 }
 
 // ── Accounts ──────────────────────────────────────────────────────────────────

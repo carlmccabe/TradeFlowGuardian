@@ -444,23 +444,22 @@ public class OandaBrokerClient : IBrokerClient
 
                 if (closeTime < from || closeTime > to) continue;
 
-                decimal.TryParse(trade["initialUnits"]?.ToString(),
-                    System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var units);
-                decimal.TryParse(trade["price"]?.ToString(),
-                    System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var price);
-                decimal.TryParse(trade["realizedPL"]?.ToString(),
-                    System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var pl);
+                DateTimeOffset.TryParse(trade["openTime"]?.ToString(), null,
+                    System.Globalization.DateTimeStyles.RoundtripKind, out var openTime);
+
+                static decimal ParseDecimal(string? s) =>
+                    decimal.TryParse(s, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0m;
 
                 result.Add(new BrokerTransaction(
                     Id:         trade["id"]?.ToString() ?? "?",
                     Type:       "TRADE_CLOSE",
                     Instrument: trade["instrument"]?.ToString(),
-                    Units:      units,
-                    Price:      price,
-                    RealizedPL: pl,
+                    Units:      ParseDecimal(trade["initialUnits"]?.ToString()),
+                    Price:      ParseDecimal(trade["price"]?.ToString()),
+                    ClosePrice: ParseDecimal(trade["averageClosePrice"]?.ToString()),
+                    RealizedPL: ParseDecimal(trade["realizedPL"]?.ToString()),
+                    OpenedAt:   openTime,
                     Timestamp:  closeTime));
             }
             return result;

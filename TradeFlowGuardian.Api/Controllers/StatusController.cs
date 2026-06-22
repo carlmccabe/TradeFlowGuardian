@@ -197,7 +197,9 @@ public class StatusController(
             instrument = t.Instrument,
             units      = t.Units,
             entryPrice = t.Price,
+            closePrice = t.ClosePrice,
             realizedPL = t.RealizedPL,
+            openedAt   = t.OpenedAt,
             closedAt   = t.Timestamp,
         }));
     }
