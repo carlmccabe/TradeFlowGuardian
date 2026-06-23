@@ -71,10 +71,12 @@ export interface TradeRecord {
 }
 
 export interface DailyPnlRecord {
-  date: string        // "YYYY-MM-DD" (daily = that day, weekly = Monday of the week)
+  date: string        // "YYYY-MM-DD" — the UTC day the trade was closed (P&L realized)
   pnl: number
   tradeCount: number
 }
+
+export type PnlRange = 'week' | 'month'
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
@@ -150,7 +152,7 @@ export const api = {
 
   getTrades: () => request<TradeRecord[]>('/status/trades'),
 
-  getPnl: (range: 'daily' | 'weekly') =>
+  getPnl: (range: PnlRange) =>
     request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
 
   closePosition: (instrument: string) =>
