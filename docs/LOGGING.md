@@ -1,4 +1,9 @@
-# Centralized Logging — Grafana Cloud
+# Centralized Logging
+
+> **Quick start on Railway:** See [docs/SEQ.md](./SEQ.md) to run a self-hosted SEQ instance —
+> no Grafana account required, just change two env vars.
+
+## Grafana Cloud
 
 Both services ship structured logs to Grafana Cloud (Loki) via OpenTelemetry OTLP,
 **in addition to** the JSON console logs that Railway's own log viewer reads. The

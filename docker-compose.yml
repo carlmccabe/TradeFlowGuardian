@@ -191,9 +191,34 @@ services:
     depends_on:
       - redis
 
+  # ── SEQ (structured log server) ──────────────────────────────────────────────
+  # Profiles:
+  #   seq        — SEQ only (lightweight alternative to the full monitoring stack)
+  #   monitoring — included alongside Grafana/Prometheus
+  #
+  # Web UI:  http://localhost:8081  (no password in dev; set SEQ_FIRSTRUN_ADMINPASSWORDHASH for prod)
+  # OTLP:    http://localhost:5341/ingest/otlp  (http/protobuf)
+  # CLEF:    http://localhost:5341/api/events/raw
+  #
+  # To ship app logs here, add these env vars to the api/worker services:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://seq:5341/ingest/otlp
+  #   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+  seq:
+    image: datalust/seq:latest
+    profiles: ["monitoring", "seq"]
+    environment:
+      - ACCEPT_EULA=Y
+    ports:
+      - "5341:5341"   # HTTP API, CLEF ingestion, OTLP ingestion
+      - "8081:80"     # Web UI (avoids conflict with api on 8080)
+    volumes:
+      - seq_data:/data
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   prometheus_data:
   loki_data:
   grafana_data:
   redisinsight_data:
+  seq_data:
