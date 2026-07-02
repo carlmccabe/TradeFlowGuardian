@@ -35,7 +35,9 @@ public class BacktestController(
             var strategy = StrategyFactory.Create(
                 request.StrategyPreset,
                 request.FastPeriods,
-                request.SlowPeriods);
+                request.SlowPeriods,
+                request.SlMultiplier,
+                request.TpMultiplier);
 
             var backtestRequest = new BacktestRequest(
                 Name:                   request.Name,
@@ -223,8 +225,9 @@ public record BacktestApiRequest
     public DateTime EndDate   { get; init; }
 
     /// <summary>
-    /// Strategy preset name. One of: emac_10_30, emac_9_21, emac_12_26, emac_custom.
+    /// Strategy preset name. One of: emac_10_30, emac_9_21, emac_12_26, emac_custom, tfg_usdjpy_v5.
     /// Use emac_custom together with FastPeriods / SlowPeriods for ad-hoc EMA periods.
+    /// Use tfg_usdjpy_v5 with SlMultiplier / TpMultiplier to sweep ATR stop widths.
     /// </summary>
     public string StrategyPreset { get; init; } = "emac_10_30";
 
@@ -233,6 +236,12 @@ public record BacktestApiRequest
 
     /// <summary>Slow EMA period — only used when StrategyPreset is "emac_custom".</summary>
     public int? SlowPeriods { get; init; }
+
+    /// <summary>Stop-loss ATR multiplier — only used for tfg presets (default 2.6).</summary>
+    public decimal? SlMultiplier { get; init; }
+
+    /// <summary>Take-profit ATR multiplier — only used for tfg presets (default 5.3).</summary>
+    public decimal? TpMultiplier { get; init; }
 
     /// <summary>Starting account balance in the account currency (AUD for the live system).</summary>
     public decimal InitialBalance { get; init; } = 10_000m;

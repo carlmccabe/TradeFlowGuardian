@@ -348,3 +348,12 @@
   - Tests: `PositionSizeCalculatorTests` (7) pin the shared formula incl. the 55,059/78,662 margin-cap traces; `BacktestEngineSizingTests` (2) run the engine end-to-end with a stub strategy — tight-stop JPY trade margin-caps at 78,400 units with exact AUD P&L, wide-stop trade gets full 2.5% risk — 78/78 passing
   - **Known limitation**: quote→account rate is constant per run (no historical AUD cross rates); fine for margin feasibility, revisit for multi-year precision
   - **Next milestone**: port the Pine TFG strategy (SMA 9/25 cross, EMA 179 trend, RSI 18, ATR 13 SL/TP) into StrategyFactory as a preset so the SL-multiplier sweep can run against the real strategy — current presets are EMAC-only and don't emit ATR-based SL/TP
+
+### 2026-07-02 (session 3)
+- **Pine TFG v5 strategy ported to C#** (`tfg_usdjpy_v5` preset) — the "drop Pine" milestone: signals are now generatable server-side and the SL sweep can run against the real strategy
+  - `TfgV5Signal` (Strategies/Signals/Tfg/) — 1:1 port of `TFG_USDJPY_live.pine` entry logic: SMA 9/25 cross + EMA 179 trend + RSI 18 (Wilder) + ATR 13 rising + EMA dist 5–69 pips; SL/TP = close ∓ slMult/tpMult × ATR (parameterised, defaults 2.6/5.3); indicators computed over bounded trailing windows (tail weight < 0.1%) so per-bar re-evaluation stays O(window) not O(N²)
+  - Session gate (00–09 + 11–12 UTC) as `OrFilter(TimeFilter, TimeFilter)` in the preset's `FilteredSignalRule`, evaluated on the engine-supplied bar timestamp — visible in pipeline traces
+  - `StrategyFactory.Create` gains optional `slMultiplier`/`tpMultiplier`; `BacktestApiRequest` exposes them (`SlMultiplier`/`TpMultiplier`) → sweeps via POST /api/backtest/run
+  - `scripts/sweep-usdjpy-sl.sh` — sweeps SL 2.6/4/6/8× ATR (TP at Pine's 2.04 ratio) at 2.5% risk under the honest margin model, prints comparison table; needs Api + cached M15 candles
+  - Tests: 6 new `TfgV5SignalTests` — dip-pop series fires Long with every Pine gate verified via diagnostics, SL/TP exactness, flat-market never fires, session in/out via preset, multiplier pass-through — 84/84 passing
+  - **Behavior note (intentional)**: like the live Worker (no-pyramid rule), the engine ignores opposite signals while a position is open — exits are SL/TP only. TV's strategy tester *reverses* on opposite entries, so the original Pine backtest differs here; ours matches live
