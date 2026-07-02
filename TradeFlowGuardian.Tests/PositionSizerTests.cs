@@ -19,7 +19,8 @@ public class PositionSizerTests
         Mock<IBrokerClient> oandaMock,
         decimal defaultRiskPct = 1.0m,
         decimal atrStopMultiplier = 2.0m,
-        decimal maxPositionUnits = 1_000_000m)
+        decimal maxPositionUnits = 1_000_000m,
+        decimal marginUtilisationLimit = 0.28m)
     {
         var risk = Options.Create(new RiskConfig
         {
@@ -27,7 +28,8 @@ public class PositionSizerTests
             MaxPositionUnits     = maxPositionUnits,
             AtrStopMultiplier    = atrStopMultiplier,
             AtrTargetMultiplier  = 4.0m,
-            MaxDailyDrawdownPercent = 3.0m
+            MaxDailyDrawdownPercent = 3.0m,
+            MarginUtilisationLimit  = marginUtilisationLimit
         });
         var riskRepo = new Mock<IRiskSettingsRepository>();
         riskRepo.Setup(r => r.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -194,6 +196,35 @@ public class PositionSizerTests
 
         // Exact marginCap = 2,800 / (149.50 / 2,940) = 2,800 / 0.050850... ≈ 55,059
         const long expectedMarginCap = 55_059L;
+        Assert.InRange(units, expectedMarginCap - 5, expectedMarginCap + 5);
+    }
+
+    [Fact]
+    public async Task UsdJpy_MarginCapScalesWithConfiguredUtilisationLimit()
+    {
+        // Same setup as the cap-binding test, but with the limit raised 0.28 → 0.40.
+        // marginCap = (10,000 × 0.40) / (149.50 × (1/30) × (1/98)) = 4,000 / 0.050850… ≈ 78,662
+        const decimal audJpy  = 98m;
+        const decimal balance = 10_000m;
+
+        var oanda  = OandaWithAudJpy(audJpy);
+        var sizer  = BuildSizer(oanda, defaultRiskPct: 50.0m, marginUtilisationLimit: 0.40m);
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 149.45m,
+            Atr            = 0.5m,
+            RiskPercent    = 50m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-caplimit-config"
+        };
+
+        var units = await sizer.CalculateUnitsAsync(signal, balance);
+
+        // 55,059 × (0.40 / 0.28) ≈ 78,662
+        const long expectedMarginCap = 78_662L;
         Assert.InRange(units, expectedMarginCap - 5, expectedMarginCap + 5);
     }
 

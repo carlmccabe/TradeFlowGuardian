@@ -73,6 +73,7 @@ Bound to `RiskConfig` from section `"Risk"`. Used by Worker.
 | `Risk:AtrTargetMultiplier` | `4.0` | Target distance = ATR × this multiplier |
 | `Risk:MaxPositionUnits` | `1000000` | Hard cap on position size units |
 | `Risk:MaxDailyDrawdownPercent` | `3.0` | Daily drawdown circuit breaker threshold (% of day-open NAV) |
+| `Risk:MarginUtilisationLimit` | `0.40` | Max fraction of account margin one trade may consume; caps size below the risk-based amount on tight-stop pairs (a warning is logged when it binds) |
 
 Current live settings per pair — see `CLAUDE.md`.
 

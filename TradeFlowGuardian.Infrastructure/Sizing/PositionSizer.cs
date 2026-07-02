@@ -75,17 +75,30 @@ public class PositionSizer : IPositionSizer
 
         var raw = riskAmount / lossPerUnit;
 
-        // Margin cap: no single trade may consume more than 28% of account margin.
-        // Leverage comes from the broker descriptor (OANDA AU 30:1 → marginRate = 1/30).
-        // quoteToAud normalises JPY/USD/EUR → AUD.
-        const decimal marginUtilisationLimit = 0.28m;
+        // Margin cap: no single trade may consume more than Risk:MarginUtilisationLimit
+        // of account margin. Leverage comes from the broker descriptor
+        // (OANDA AU 30:1 → marginRate = 1/30). quoteToAud normalises JPY/USD/EUR → AUD.
         var marginRate = 1.0m / _broker.Descriptor.Leverage;
         var marginCap = (signal.Price > 0)
-            ? (accountBalance * marginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
+            ? (accountBalance * _risk.MarginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
             : _risk.MaxPositionUnits;
 
         var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
         var units  = (long)Math.Round(capped);
+
+        if (capped < raw)
+        {
+            var effectiveRiskPct = accountBalance > 0
+                ? (capped * lossPerUnit / accountBalance) * 100m
+                : 0m;
+            _logger.LogWarning(
+                "Position size capped for {Instrument}: risk formula wants {Raw:F0} units " +
+                "but {CapSource} allows only {Capped:F0}. Effective risk ≈ {EffectiveRiskPct:F2}% " +
+                "instead of the configured {RiskPct}%.",
+                signal.Instrument, raw,
+                marginCap < _risk.MaxPositionUnits ? $"margin limit ({_risk.MarginUtilisationLimit:P0})" : "MaxPositionUnits",
+                capped, effectiveRiskPct, riskPct);
+        }
 
         _logger.LogInformation(
             "Sizing {Instrument} {Direction} | riskSource={RiskSource} riskPct={RiskPct}% riskAmount={RiskAmount:F2} AUD | " +

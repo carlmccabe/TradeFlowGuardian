@@ -342,6 +342,7 @@ required ones will prevent startup if missing.
 | `Risk__DefaultRiskPercent` | | `1.0` | Default risk % per trade |
 | `Risk__AtrStopMultiplier` | | `2.0` | ATR × this = stop distance |
 | `Risk__AtrTargetMultiplier` | | `4.0` | ATR × this = target distance |
+| `Risk__MarginUtilisationLimit` | | `0.40` | Max margin fraction per trade (caps position size) |
 | `Filters__EnableAtrSpikeFilter` | | `true` | Block signals during ATR spikes |
 | `Filters__AtrSpikeMultiplier` | | `2.0` | ATR spike threshold multiplier |
 | `Filters__SignalMaxAgeSeconds` | | `60` | Reject signals older than this |

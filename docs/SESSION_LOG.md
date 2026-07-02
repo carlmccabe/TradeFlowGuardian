@@ -330,3 +330,11 @@
   - Migration `005_broker_column.sql` — additive `broker` discriminator on oanda_accounts (default 'oanda'), not yet read by code
   - 6 new `OandaBrokerClientMappingTests` pin the exact outgoing OANDA wire requests (capturing HttpMessageHandler) — 67/67 passing
   - `docs/BROKER_ABSTRACTION.md` — port surface, canonical EUR_USD instrument format, new-adapter checklist, deferred follow-ups
+
+### 2026-07-02
+- **Margin cap made configurable + raised** — diagnosed why live USD_JPY trades risked ~$600 instead of the configured 2.5% (~$2,600): the hardcoded 28% margin-utilisation cap in `PositionSizer` binds on tight-stop JPY signals (risk formula wants ~2.5–3.3M units; cap allowed ~617k), so the risk % was never reached
+  - `RiskConfig.MarginUtilisationLimit` added (default `0.40`); `PositionSizer` reads it instead of the `const 0.28m` — at current prices USD_JPY caps at ~880k units (~0.86% effective risk) instead of ~617k (~0.6%)
+  - Warning now logged whenever the cap (or `MaxPositionUnits`) overrides the risk-based size, including the effective risk % actually taken
+  - `Risk:MarginUtilisationLimit: 0.40` added to Api + Worker appsettings; documented in CONFIGURATION.md and DEPLOYMENT.md (tunable via `Risk__MarginUtilisationLimit` env var, no redeploy of code needed)
+  - Tests: `BuildSizer` takes explicit `marginUtilisationLimit` (0.28 default preserves existing expectations); new test pins that the config value scales the cap — 68/68 passing
+  - Note: next ceiling is `MaxPositionUnits` (1,000,000) — reaching the earlier-discussed 1.5M units would need that raised too, plus margin limit ~0.68

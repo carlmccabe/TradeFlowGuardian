@@ -26,6 +26,13 @@ public class RiskConfig
     public decimal AtrStopMultiplier { get; init; } = 2.0m;
     public decimal AtrTargetMultiplier { get; init; } = 4.0m;
     public decimal MaxDailyDrawdownPercent { get; init; } = 3.0m;
+
+    /// <summary>
+    /// Max fraction of account margin a single trade may consume (0–1).
+    /// Caps position size after the risk-based calculation; binds on tight-stop
+    /// pairs like USD_JPY where the risk formula asks for a large notional.
+    /// </summary>
+    public decimal MarginUtilisationLimit { get; init; } = 0.40m;
 }
 
 public class FilterConfig
