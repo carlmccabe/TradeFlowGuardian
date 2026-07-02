@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using TradeFlowGuardian.Backtesting.Data;
 using TradeFlowGuardian.Backtesting.Engine;
 using TradeFlowGuardian.Backtesting.Models;
 using TradeFlowGuardian.Backtesting.Strategies;
+using TradeFlowGuardian.Core.Configuration;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
@@ -13,20 +15,29 @@ public class BacktestController(
     IBacktestEngine engine,
     IHistoricalDataProvider dataProvider,
     BacktestDataContext db,
+    IOptions<WebhookConfig> webhook,
     ILogger<BacktestController> logger) : ControllerBase
 {
+    private const string SecretHeader = "X-Admin-Secret";
+
     /// <summary>
     /// Runs a backtest and persists the result.
+    /// Requires the admin secret (X-Admin-Secret header, same value as the webhook
+    /// secret) — runs are CPU-heavy and can trigger OANDA historical fetches, so the
+    /// endpoint must not be publicly triggerable. Read endpoints stay open like /status.
     /// Fetches historical candles from OANDA (cached in PostgreSQL after first run).
     /// Note: large date ranges over short timeframes may take 30–120 s.
     /// </summary>
     [HttpPost("run")]
     [ProducesResponseType(typeof(BacktestResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RunBacktest(
         [FromBody] BacktestApiRequest request,
         CancellationToken cancellationToken)
     {
+        if (NotAuthorized(out var challenge)) return challenge;
+
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
@@ -185,6 +196,20 @@ public class BacktestController(
             IsAvailable:      coveragePct >= 80m,
             EarliestCached:   earliest,
             LatestCached:     latest));
+    }
+
+    private bool NotAuthorized(out IActionResult challenge)
+    {
+        var expected = webhook.Value.Secret;
+        var provided = Request.Headers[SecretHeader].FirstOrDefault();
+        if (string.IsNullOrEmpty(expected) || provided != expected)
+        {
+            logger.LogWarning("Rejected backtest run request — missing or invalid {Header}", SecretHeader);
+            challenge = StatusCode(StatusCodes.Status401Unauthorized, new { error = "invalid or missing X-Admin-Secret header" });
+            return true;
+        }
+        challenge = Ok();
+        return false;
     }
 
     /// <summary>Candle count estimate: total minutes / candle-minutes × 0.71 (weekend exclusion).</summary>

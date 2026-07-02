@@ -14,24 +14,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// Like request(), but surfaces the server's { error } message on failure.
-// Used where the API returns actionable validation errors (e.g. backtest runs).
-async function requestVerbose<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  })
-  if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const body = await res.json()
-      if (body?.error) message = body.error
-    } catch { /* non-JSON error body */ }
-    throw new Error(message)
-  }
-  return res.json() as Promise<T>
-}
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
@@ -310,8 +292,10 @@ export const api = {
 
   resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
 
+  // Runs require the admin secret (same header as account management) — the
+  // endpoint is CPU-heavy and must not be publicly triggerable.
   runBacktest: (body: RunBacktestRequest) =>
-    requestVerbose<BacktestResultResponse>('/backtest/run', {
+    adminRequest<BacktestResultResponse>('/backtest/run', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

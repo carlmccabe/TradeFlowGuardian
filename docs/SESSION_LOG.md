@@ -366,3 +366,9 @@
   - Saved runs list (GET /api/backtest/runs) — tap to reload any prior run's full result
   - `client.ts`: backtest types + runBacktest/getBacktestRuns/getBacktestRun/getBacktestStrategies/getDataCoverage; `requestVerbose` helper surfaces the API's { error } messages (e.g. "Insufficient data")
   - `tsc -b && vite build` clean; the one eslint error (useSignalR.ts ref-in-render) is pre-existing
+
+### 2026-07-02 (session 5)
+- **Backtest run endpoint gated behind admin secret** — POST /api/backtest/run now requires `X-Admin-Secret` (same value as the webhook secret, same pattern as AccountsController); read endpoints (runs list, coverage, strategies) stay open like /status
+  - Dashboard `runBacktest` switched to the adminRequest path (secret already stored via Acct tab); Test tab shows a hint when 401'd
+  - `scripts/sweep-usdjpy-sl.sh` requires `TFG_ADMIN_SECRET` env var and sends the header
+  - 3 new `BacktestControllerAuthTests` pin 401-without/wrong-secret (engine never invoked) and pass-through with correct secret — 87/87 passing

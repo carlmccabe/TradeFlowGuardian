@@ -216,7 +216,16 @@ export function BacktestTab() {
           {running ? 'Running… (may take 1–2 min)' : 'Run backtest'}
         </button>
 
-        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+        {error && (
+          <p className="mt-3 text-sm text-red-400">
+            {error}
+            {error.includes('X-Admin-Secret') && (
+              <span className="block mt-1 text-xs text-gray-500">
+                Set the admin secret in the Acct tab first — backtest runs use the same secret.
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
       {/* ── Result ───────────────────────────────────────────────────────── */}

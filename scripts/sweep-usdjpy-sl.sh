@@ -5,14 +5,17 @@
 # (run GET /api/backtest/data/coverage first).
 #
 # Usage:
-#   ./scripts/sweep-usdjpy-sl.sh [API_BASE] [START_DATE] [END_DATE] [BALANCE]
-#   ./scripts/sweep-usdjpy-sl.sh http://localhost:5000 2025-01-01 2026-06-30 100000
+#   TFG_ADMIN_SECRET=... ./scripts/sweep-usdjpy-sl.sh [API_BASE] [START_DATE] [END_DATE] [BALANCE]
+#   TFG_ADMIN_SECRET=... ./scripts/sweep-usdjpy-sl.sh http://localhost:5000 2025-01-01 2026-06-30 100000
+#
+# POST /api/backtest/run requires the admin secret (same value as the webhook secret).
 set -euo pipefail
 
 API_BASE="${1:-http://localhost:5000}"
 START="${2:-2025-01-01}"
 END="${3:-2026-06-30}"
 BALANCE="${4:-100000}"
+: "${TFG_ADMIN_SECRET:?Set TFG_ADMIN_SECRET (the webhook/admin secret) to run backtests}"
 
 # SL multipliers to test; TP = SL × 2.04 (Pine's 2.6→5.3 ratio)
 SL_MULTS=(2.6 4.0 6.0 8.0)
@@ -28,6 +31,7 @@ for SL in "${SL_MULTS[@]}"; do
 
   RESPONSE=$(curl -sS -X POST "$API_BASE/api/backtest/run" \
     -H "Content-Type: application/json" \
+    -H "X-Admin-Secret: $TFG_ADMIN_SECRET" \
     -d @- <<JSON
 {
   "name": "sweep USDJPY SL${SL}x TP${TP}x",
