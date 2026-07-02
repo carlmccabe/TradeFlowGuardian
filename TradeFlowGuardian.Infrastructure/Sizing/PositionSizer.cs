@@ -4,6 +4,7 @@ using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
+using TradeFlowGuardian.Core.Sizing;
 
 namespace TradeFlowGuardian.Infrastructure.Sizing;
 
@@ -63,41 +64,31 @@ public class PositionSizer : IPositionSizer
 
         var quoteToAud = await GetQuoteToAudAsync(signal.Instrument, ct);
 
-        var lossPerUnit = stopDistance * quoteToAud;
-
-        if (lossPerUnit <= 0)
-        {
-            _logger.LogError(
-                "Sizing aborted for {Instrument}: lossPerUnit={LossPerUnit} (stopDistance={StopDist}, quoteToAud={QuoteToAud})",
-                signal.Instrument, lossPerUnit, stopDistance, quoteToAud);
-            return 0;
-        }
-
-        var raw = riskAmount / lossPerUnit;
-
         // Margin cap: no single trade may consume more than Risk:MarginUtilisationLimit
         // of account margin. Leverage comes from the broker descriptor
         // (OANDA AU 30:1 → marginRate = 1/30). quoteToAud normalises JPY/USD/EUR → AUD.
-        var marginRate = 1.0m / _broker.Descriptor.Leverage;
-        var marginCap = (signal.Price > 0)
-            ? (accountBalance * _risk.MarginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
-            : _risk.MaxPositionUnits;
+        var size = PositionSizeCalculator.Calculate(
+            accountBalance, riskAmount, stopDistance, quoteToAud,
+            signal.Price, _broker.Descriptor.Leverage,
+            _risk.MarginUtilisationLimit, _risk.MaxPositionUnits);
 
-        var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
-        var units  = (long)Math.Round(capped);
-
-        if (capped < raw)
+        if (size.Units <= 0)
         {
-            var effectiveRiskPct = accountBalance > 0
-                ? (capped * lossPerUnit / accountBalance) * 100m
-                : 0m;
+            _logger.LogError(
+                "Sizing aborted for {Instrument}: units=0 (stopDistance={StopDist}, quoteToAud={QuoteToAud}, riskAmount={RiskAmount})",
+                signal.Instrument, stopDistance, quoteToAud, riskAmount);
+            return 0;
+        }
+
+        if (size.BindingCap != PositionSizeCap.None)
+        {
             _logger.LogWarning(
                 "Position size capped for {Instrument}: risk formula wants {Raw:F0} units " +
-                "but {CapSource} allows only {Capped:F0}. Effective risk ≈ {EffectiveRiskPct:F2}% " +
+                "but {CapSource} allows only {Capped}. Effective risk ≈ {EffectiveRiskPct:F2}% " +
                 "instead of the configured {RiskPct}%.",
-                signal.Instrument, raw,
-                marginCap < _risk.MaxPositionUnits ? $"margin limit ({_risk.MarginUtilisationLimit:P0})" : "MaxPositionUnits",
-                capped, effectiveRiskPct, riskPct);
+                signal.Instrument, size.RawUnits,
+                size.BindingCap == PositionSizeCap.MarginLimit ? $"margin limit ({_risk.MarginUtilisationLimit:P0})" : "MaxPositionUnits",
+                size.Units, size.EffectiveRiskPercent(accountBalance), riskPct);
         }
 
         _logger.LogInformation(
@@ -106,10 +97,10 @@ public class PositionSizer : IPositionSizer
             "raw={Raw:F0} marginCap={MarginCap:F0} units={Units}",
             signal.Instrument, signal.Direction,
             riskSource, riskPct, riskAmount,
-            stopSource, stopDistance, quoteToAud, lossPerUnit,
-            raw, marginCap, units);
+            stopSource, stopDistance, quoteToAud, size.LossPerUnit,
+            size.RawUnits, size.MarginCapUnits, size.Units);
 
-        return units;
+        return size.Units;
     }
 
     /// <summary>

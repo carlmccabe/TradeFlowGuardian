@@ -338,3 +338,13 @@
   - `Risk:MarginUtilisationLimit: 0.40` added to Api + Worker appsettings; documented in CONFIGURATION.md and DEPLOYMENT.md (tunable via `Risk__MarginUtilisationLimit` env var, no redeploy of code needed)
   - Tests: `BuildSizer` takes explicit `marginUtilisationLimit` (0.28 default preserves existing expectations); new test pins that the config value scales the cap — 68/68 passing
   - Note: next ceiling is `MaxPositionUnits` (1,000,000) — reaching the earlier-discussed 1.5M units would need that raised too, plus margin limit ~0.68
+
+### 2026-07-02 (session 2)
+- **Backtest engine margin/currency honesty** — first step toward dropping Pine and backtesting apples-to-apples against the live system
+  - `PositionSizeCalculator` added to Core (`Core/Sizing/`) — the single pure sizing formula (risk units + margin cap + max-units cap, reports which cap bound and effective risk %); live `PositionSizer` now delegates to it, behavior unchanged (existing PositionSizerTests pass untouched = parity proof)
+  - `BacktestEngine` sizing rewritten: was `units = riskAmount / stopDistance` with no quote-currency conversion (units ~112× too small on JPY pairs, margin unmodellable) — now uses the shared calculator with `Leverage` (30), `MarginUtilisationLimit` (0.40), `MaxPositionUnits` (1M), `QuoteToAccountRate` (static per-quote-currency fallbacks matching PositionSizer's) on `BacktestRequest`; warns when a cap binds, same as live
+  - `BacktestTrade` P&L now converts quote → account currency (`QuoteToAccountRate` on the trade); `RMultiple`, `PnLPercent` consistent; spread cost fixed (was subtracting a raw pip count from currency P&L), commission now on real unit counts
+  - `BacktestApiRequest` exposes the four new knobs on POST /api/backtest/run
+  - Tests: `PositionSizeCalculatorTests` (7) pin the shared formula incl. the 55,059/78,662 margin-cap traces; `BacktestEngineSizingTests` (2) run the engine end-to-end with a stub strategy — tight-stop JPY trade margin-caps at 78,400 units with exact AUD P&L, wide-stop trade gets full 2.5% risk — 78/78 passing
+  - **Known limitation**: quote→account rate is constant per run (no historical AUD cross rates); fine for margin feasibility, revisit for multi-year precision
+  - **Next milestone**: port the Pine TFG strategy (SMA 9/25 cross, EMA 179 trend, RSI 18, ATR 13 SL/TP) into StrategyFactory as a preset so the SL-multiplier sweep can run against the real strategy — current presets are EMAC-only and don't emit ATR-based SL/TP

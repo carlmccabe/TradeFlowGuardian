@@ -23,6 +23,12 @@ public record BacktestTrade
     public decimal? MFE { get; init; } // Maximum Favorable Excursion
 
     /// <summary>
+    /// Quote-currency → account-currency conversion rate at entry (e.g. JPY→AUD ≈ 1/98).
+    /// Units × price moves are in quote currency; PnL must land in the account currency.
+    /// </summary>
+    public decimal QuoteToAccountRate { get; init; } = 1m;
+
+    /// <summary>
     /// Trade outcome expressed as a multiple of initial risk.
     /// 1R = won exactly the amount risked. -1R = stopped out at SL.
     /// Null when StopLoss is not set (risk basis unknown).
@@ -32,7 +38,7 @@ public record BacktestTrade
         get
         {
             if (!StopLoss.HasValue || Units == 0) return null;
-            var initialRisk = Math.Abs(EntryPrice - StopLoss.Value) * Units;
+            var initialRisk = Math.Abs(EntryPrice - StopLoss.Value) * Units * QuoteToAccountRate;
             return initialRisk == 0 ? null : Math.Round(PnL / initialRisk, 2);
         }
     }
@@ -40,12 +46,12 @@ public record BacktestTrade
     public decimal CalculateUnrealizedPnL(decimal currentPrice)
     {
         var priceChange = Direction == "Long" ? currentPrice - EntryPrice : EntryPrice - currentPrice;
-        return Units * priceChange;
+        return Units * priceChange * QuoteToAccountRate;
     }
 
     public decimal CalculateRealizedPnL(decimal exitPrice)
     {
         var priceChange = Direction == "Long" ? exitPrice - EntryPrice : EntryPrice - exitPrice;
-        return Units * priceChange;
+        return Units * priceChange * QuoteToAccountRate;
     }
 }

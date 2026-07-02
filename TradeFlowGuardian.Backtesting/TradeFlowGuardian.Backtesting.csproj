@@ -28,6 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\TradeFlowGuardian.Core\TradeFlowGuardian.Core.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Domain\TradeFlowGuardian.Domain.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Infrastructure\TradeFlowGuardian.Infrastructure.csproj" />
     <ProjectReference Include="..\TradeFlowGuardian.Strategies\TradeFlowGuardian.Strategies.csproj" />

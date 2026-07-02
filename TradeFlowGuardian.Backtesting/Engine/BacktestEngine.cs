@@ -5,6 +5,7 @@ using System.Text.Json;
 using TradeFlowGuardian.Backtesting.Data;
 using TradeFlowGuardian.Backtesting.Data.Entities;
 using TradeFlowGuardian.Backtesting.Models;
+using TradeFlowGuardian.Core.Sizing;
 using TradeFlowGuardian.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,15 @@ public class BacktestEngine(
 
         // Pre-map candles to Candle objects once for the strategy
         var mappedCandles = backtestCandles.Select(MapToCandle).ToList();
+
+        // Quote-currency → account-currency rate, held constant for the run.
+        // Sizing and PnL both need it: units × price moves are in quote currency.
+        var quoteToAccount = request.QuoteToAccountRate
+                             ?? FallbackQuoteToAccountRate(request.Instrument);
+        logger.LogInformation(
+            "Margin model: leverage={Leverage}:1 marginLimit={MarginLimit:P0} maxUnits={MaxUnits} quoteToAccount={QuoteToAccount:F6}{RateSource}",
+            request.Leverage, request.MarginUtilisationLimit, request.MaxPositionUnits,
+            quoteToAccount, request.QuoteToAccountRate.HasValue ? "" : " (static fallback)");
 
         // Initialize backtest state
         var trades = new List<BacktestTrade>();
@@ -77,17 +87,19 @@ public class BacktestEngine(
                     // Close trade
                     var realizedPnL = openTrade.CalculateRealizedPnL(exitResult.ExitPrice);
                     var commission = CalculateCommission(openTrade.Units, request.Commission);
-                    var slippage = CalculateSlippage(openTrade.Direction == "Long" ? -1 : 1, request.SpreadPips);
+                    var slippage = CalculateSpreadCost(
+                        openTrade.Units, request.SpreadPips, GetPipSize(request.Instrument), quoteToAccount);
 
                     var finalPnL = realizedPnL - commission - slippage;
                     balance += finalPnL;
 
+                    var notional = openTrade.Units * openTrade.EntryPrice * quoteToAccount;
                     var completedTrade = openTrade with
                     {
                         ExitTime = currentCandle.Time,
                         ExitPrice = exitResult.ExitPrice,
                         PnL = finalPnL,
-                        PnLPercent = (openTrade.Units * openTrade.EntryPrice) == 0 ? 0 : finalPnL / (openTrade.Units * openTrade.EntryPrice),
+                        PnLPercent = notional == 0 ? 0 : finalPnL / notional,
                         Commission = commission,
                         Slippage = slippage,
                         ExitReason = exitResult.Reason
@@ -141,13 +153,26 @@ public class BacktestEngine(
             var rawStopDistance = Math.Abs(price - sl.Value);
             var stopDistance = rawStopDistance < minStopDistance ? minStopDistance : rawStopDistance;
 
-            // Risk-based sizing
+            // Risk-based sizing — the exact formula the live PositionSizer uses,
+            // including the margin utilisation cap and max-units ceiling.
             var riskAmount = request.InitialBalance > 0 ? (balance * request.RiskPerTrade) : 0m;
             if (riskAmount <= 0m) continue;
 
-            // Units = risk in price units divided by stop distance
-            var units = Math.Floor(stopDistance <= 0m ? 0m : (riskAmount / stopDistance));
-            if (units <= 0) continue; // No position size available
+            var size = PositionSizeCalculator.Calculate(
+                balance, riskAmount, stopDistance, quoteToAccount,
+                price, request.Leverage, request.MarginUtilisationLimit, request.MaxPositionUnits);
+
+            if (size.Units <= 0) continue; // No position size available
+
+            if (size.BindingCap != PositionSizeCap.None)
+            {
+                logger.LogWarning(
+                    "⚠️ Position size capped: risk formula wants {Raw:F0} units but {CapSource} allows only {Capped}. " +
+                    "Effective risk ≈ {EffectiveRiskPct:F2}% instead of {RiskPct:F2}%.",
+                    size.RawUnits,
+                    size.BindingCap == PositionSizeCap.MarginLimit ? $"margin limit ({request.MarginUtilisationLimit:P0})" : "MaxPositionUnits",
+                    size.Units, size.EffectiveRiskPercent(balance), request.RiskPerTrade * 100m);
+            }
 
             tradeNumber++;
             openTrade = new BacktestTrade
@@ -158,9 +183,10 @@ public class BacktestEngine(
                 Direction = isBuy ? "Long" : "Short",
                 EntryTime = currentCandle.Time,
                 EntryPrice = price,
-                Units = units,
+                Units = size.Units,
                 StopLoss = sl,
-                TakeProfit = decision.TakeProfit
+                TakeProfit = decision.TakeProfit,
+                QuoteToAccountRate = quoteToAccount
             };
 
             logger.LogInformation(
@@ -342,10 +368,34 @@ public class BacktestEngine(
         return lots * commissionRate;
     }
 
-    private decimal CalculateSlippage(int direction, decimal spreadPips)
+    /// <summary>
+    /// Round-trip spread cost in account currency: crossing the spread once
+    /// (enter at ask, exit at bid) costs spread × units, converted from quote currency.
+    /// </summary>
+    private static decimal CalculateSpreadCost(decimal units, decimal spreadPips, decimal pipSize, decimal quoteToAccount)
     {
-        // Simple slippage model - half the spread
-        return spreadPips * 0.5m * Math.Abs(direction);
+        return Math.Abs(units) * spreadPips * pipSize * quoteToAccount;
+    }
+
+    /// <summary>
+    /// Conservative static quote→account (AUD) rates, used when the request doesn't
+    /// supply one. Same values as the live PositionSizer's pricing-outage fallbacks.
+    /// </summary>
+    private static decimal FallbackQuoteToAccountRate(string instrument)
+    {
+        var quoteCurrency = instrument.Split('_').LastOrDefault() ?? "USD";
+        return quoteCurrency switch
+        {
+            "AUD" => 1.0m,
+            "USD" => 1.0m / 0.63m,   // 1 / AUDUSD
+            "JPY" => 1.0m / 98m,     // 1 / AUDJPY
+            "CAD" => 1.0m / 0.87m,
+            "CHF" => 1.0m / 0.57m,
+            "NZD" => 1.0m / 1.09m,
+            "GBP" => 1.97m,          // GBPAUD
+            "EUR" => 1.72m,          // EURAUD
+            _ => 1.0m
+        };
     }
 
     private Candle MapToCandle(BacktestCandle backtestCandle)

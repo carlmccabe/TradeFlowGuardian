@@ -38,16 +38,20 @@ public class BacktestController(
                 request.SlowPeriods);
 
             var backtestRequest = new BacktestRequest(
-                Name:           request.Name,
-                Strategy:       strategy,
-                Instrument:     request.Instrument,
-                Timeframe:      request.Timeframe,
-                StartDate:      request.StartDate,
-                EndDate:        request.EndDate,
-                InitialBalance: request.InitialBalance,
-                RiskPerTrade:   request.RiskPerTrade,
-                Commission:     request.Commission,
-                SpreadPips:     request.SpreadPips);
+                Name:                   request.Name,
+                Strategy:               strategy,
+                Instrument:             request.Instrument,
+                Timeframe:              request.Timeframe,
+                StartDate:              request.StartDate,
+                EndDate:                request.EndDate,
+                InitialBalance:         request.InitialBalance,
+                RiskPerTrade:           request.RiskPerTrade,
+                Commission:             request.Commission,
+                SpreadPips:             request.SpreadPips,
+                Leverage:               request.Leverage,
+                MarginUtilisationLimit: request.MarginUtilisationLimit,
+                MaxPositionUnits:       request.MaxPositionUnits,
+                QuoteToAccountRate:     request.QuoteToAccountRate);
 
             logger.LogInformation(
                 "Backtest starting: {Name} | {Preset} | {Instrument} {Timeframe} {Start:d}–{End:d}",
@@ -230,17 +234,32 @@ public record BacktestApiRequest
     /// <summary>Slow EMA period — only used when StrategyPreset is "emac_custom".</summary>
     public int? SlowPeriods { get; init; }
 
-    /// <summary>Starting account balance in USD.</summary>
+    /// <summary>Starting account balance in the account currency (AUD for the live system).</summary>
     public decimal InitialBalance { get; init; } = 10_000m;
 
     /// <summary>Fraction of balance risked per trade (e.g., 0.01 = 1%).</summary>
     public decimal RiskPerTrade { get; init; } = 0.01m;
 
-    /// <summary>Round-trip commission in USD per 100k lot.</summary>
+    /// <summary>Round-trip commission in account currency per 100k lot.</summary>
     public decimal Commission { get; init; } = 7m;
 
     /// <summary>Assumed spread in pips added to entry cost.</summary>
     public decimal SpreadPips { get; init; } = 0.5m;
+
+    /// <summary>Broker leverage (OANDA AU = 30).</summary>
+    public decimal Leverage { get; init; } = 30m;
+
+    /// <summary>Max fraction of account margin one trade may consume — mirrors live Risk:MarginUtilisationLimit.</summary>
+    public decimal MarginUtilisationLimit { get; init; } = 0.40m;
+
+    /// <summary>Hard cap on position size units — mirrors live Risk:MaxPositionUnits.</summary>
+    public decimal MaxPositionUnits { get; init; } = 1_000_000m;
+
+    /// <summary>
+    /// Quote-currency → account-currency rate (e.g. ~0.0102 for JPY→AUD).
+    /// Omit to use a conservative static rate for the instrument's quote currency.
+    /// </summary>
+    public decimal? QuoteToAccountRate { get; init; }
 }
 
 /// <summary>Lightweight summary row returned by GET /api/backtest/runs.</summary>
