@@ -14,6 +14,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// Like request(), but surfaces the server's { error } message on failure.
+// Used where the API returns actionable validation errors (e.g. backtest runs).
+async function requestVerbose<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    ...init,
+  })
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const body = await res.json()
+      if (body?.error) message = body.error
+    } catch { /* non-JSON error body */ }
+    throw new Error(message)
+  }
+  return res.json() as Promise<T>
+}
+
 // ── Status ────────────────────────────────────────────────────────────────────
 
 export interface BalanceResponse {
@@ -74,6 +93,123 @@ export interface DailyPnlRecord {
   date: string        // "YYYY-MM-DD" (daily = that day, weekly = Monday of the week)
   pnl: number
   tradeCount: number
+}
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+export interface RunBacktestRequest {
+  name: string
+  strategyPreset: string
+  instrument: string
+  timeframe: string
+  startDate: string          // ISO
+  endDate: string            // ISO
+  initialBalance: number
+  riskPerTrade: number       // fraction, e.g. 0.025
+  fastPeriods?: number       // emac_custom only
+  slowPeriods?: number       // emac_custom only
+  slMultiplier?: number      // tfg presets only
+  tpMultiplier?: number      // tfg presets only
+  leverage?: number
+  marginUtilisationLimit?: number
+  maxPositionUnits?: number
+}
+
+export interface BacktestMetrics {
+  totalTrades: number
+  winningTrades: number
+  losingTrades: number
+  winRate: number
+  profitFactor: number
+  averageWin: number
+  averageLoss: number
+  largestWin: number
+  largestLoss: number
+  maxDrawdown: number
+  sharpeRatio: number
+  sortinoRatio: number
+  calmarRatio: number
+  expectancyRatio: number
+  monthlyBreakdown: MonthlyPerformance[]
+}
+
+export interface MonthlyPerformance {
+  year: number
+  month: number
+  pnL: number
+  trades: number
+  wins: number
+  winRate: number
+  averageR: number
+  label: string
+}
+
+export interface BacktestEquityPoint {
+  timestamp: string
+  balance: number
+  equity: number
+  drawdownPercent: number
+}
+
+export interface BacktestTradeRecord {
+  tradeNumber: number
+  instrument: string
+  direction: 'Long' | 'Short'
+  entryTime: string
+  entryPrice: number
+  exitTime: string
+  exitPrice: number
+  units: number
+  stopLoss: number | null
+  takeProfit: number | null
+  pnL: number
+  exitReason: string
+  rMultiple: number | null
+}
+
+export interface BacktestResultResponse {
+  id: string
+  name: string
+  strategyName: string
+  instrument: string
+  timeframe: string
+  startDate: string
+  endDate: string
+  initialBalance: number
+  finalBalance: number
+  totalReturn: number
+  trades: BacktestTradeRecord[]
+  equityCurve: BacktestEquityPoint[]
+  metrics: BacktestMetrics
+}
+
+export interface BacktestRunSummary {
+  id: string
+  name: string
+  strategyName: string
+  instrument: string
+  timeframe: string
+  startDate: string
+  endDate: string
+  initialBalance: number
+  finalBalance: number
+  totalReturn: number
+  maxDrawdown: number
+  sharpeRatio: number | null
+  winRate: number | null
+  totalTrades: number
+  createdAt: string
+}
+
+export interface DataCoverageResponse {
+  instrument: string
+  timeframe: string
+  candlesFound: number
+  candlesExpected: number
+  coveragePercent: number
+  isAvailable: boolean
+  earliestCached: string | null
+  latestCached: string | null
 }
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -173,6 +309,24 @@ export const api = {
   pauseAll: () => request<void>('/risk/pause-all', { method: 'POST' }),
 
   resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
+
+  runBacktest: (body: RunBacktestRequest) =>
+    requestVerbose<BacktestResultResponse>('/backtest/run', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getBacktestRuns: (limit = 20) =>
+    request<BacktestRunSummary[]>(`/backtest/runs?limit=${limit}`),
+
+  getBacktestRun: (id: string) =>
+    request<BacktestResultResponse>(`/backtest/runs/${id}`),
+
+  getBacktestStrategies: () => request<string[]>('/backtest/strategies'),
+
+  getDataCoverage: (instrument: string, timeframe: string, startDate: string, endDate: string) =>
+    request<DataCoverageResponse>(
+      `/backtest/data/coverage?instrument=${instrument}&timeframe=${timeframe}&startDate=${startDate}&endDate=${endDate}`),
 
   getActiveAccount: () => request<ActiveAccountResponse>('/accounts/active'),
 

@@ -357,3 +357,12 @@
   - `scripts/sweep-usdjpy-sl.sh` — sweeps SL 2.6/4/6/8× ATR (TP at Pine's 2.04 ratio) at 2.5% risk under the honest margin model, prints comparison table; needs Api + cached M15 candles
   - Tests: 6 new `TfgV5SignalTests` — dip-pop series fires Long with every Pine gate verified via diagnostics, SL/TP exactness, flat-market never fires, session in/out via preset, multiplier pass-through — 84/84 passing
   - **Behavior note (intentional)**: like the live Worker (no-pyramid rule), the engine ignores opposite signals while a position is open — exits are SL/TP only. TV's strategy tester *reverses* on opposite entries, so the original Pine backtest differs here; ours matches live
+
+### 2026-07-02 (session 4)
+- **Backtest UI in the React dashboard** — new "Test" tab (`BacktestTab.tsx`)
+  - Run form: strategy preset (fetched from GET /api/backtest/strategies, tfg_usdjpy_v5 default), SL×ATR / TP×ATR inputs for tfg presets, Fast/Slow for emac_custom, instrument/timeframe/date range/balance/risk %; collapsible margin-model section (leverage, margin cap %, max units) defaulting to live values (30:1 / 40% / 1M)
+  - Data-coverage hint auto-fetches on window change; warns when < 80% (first run will pull from OANDA)
+  - Result panel: headline return + hand-rolled SVG equity curve (`EquityChart.tsx`, downsampled to 300 pts, dashed starting-balance baseline), metrics grid (trades/win rate/max DD/PF/Sharpe/expectancy/avg win-loss), monthly breakdown with R multiples, trade list (last 25, expandable) with exit reason + R
+  - Saved runs list (GET /api/backtest/runs) — tap to reload any prior run's full result
+  - `client.ts`: backtest types + runBacktest/getBacktestRuns/getBacktestRun/getBacktestStrategies/getDataCoverage; `requestVerbose` helper surfaces the API's { error } messages (e.g. "Insufficient data")
+  - `tsc -b && vite build` clean; the one eslint error (useSignalR.ts ref-in-render) is pre-existing
