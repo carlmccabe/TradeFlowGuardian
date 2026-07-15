@@ -104,21 +104,48 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
 
       {/* Position details */}
       {position ? (
-        <div className="grid grid-cols-3 gap-2 mb-3 text-sm">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Entry</p>
-            <p className="font-mono text-gray-200">{position.averagePrice.toFixed(position.averagePrice > 10 ? 3 : 5)}</p>
+        <div className="mb-3">
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Entry</p>
+              <p className="font-mono text-gray-200">{position.averagePrice.toFixed(position.averagePrice > 10 ? 3 : 5)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Units</p>
+              <p className="font-mono text-gray-200">{Math.abs(position.units).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Unreal. P&amp;L</p>
+              <p className={`font-mono font-semibold ${plColor}`}>
+                {position.unrealizedPL >= 0 ? '+' : ''}{position.unrealizedPL.toFixed(2)}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Units</p>
-            <p className="font-mono text-gray-200">{Math.abs(position.units).toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Unreal. P&amp;L</p>
-            <p className={`font-mono font-semibold ${plColor}`}>
-              {position.unrealizedPL >= 0 ? '+' : ''}{position.unrealizedPL.toFixed(2)}
-            </p>
-          </div>
+          {/* Stop/target projections from the entry order's sizing record */}
+          {(position.stopLoss !== null || position.takeProfit !== null) && (
+            <div className="grid grid-cols-2 gap-2 text-sm mt-2 pt-2 border-t border-gray-800">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">
+                  Stop{position.stopLoss !== null && (
+                    <span className="text-gray-600 normal-case"> {position.stopLoss.toFixed(position.stopLoss > 10 ? 3 : 5)}</span>
+                  )}
+                </p>
+                <p className="font-mono font-semibold text-red-400">
+                  {position.projectedLossAud !== null ? `−$${position.projectedLossAud.toFixed(2)}` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">
+                  Target{position.takeProfit !== null && (
+                    <span className="text-gray-600 normal-case"> {position.takeProfit.toFixed(position.takeProfit > 10 ? 3 : 5)}</span>
+                  )}
+                </p>
+                <p className="font-mono font-semibold text-emerald-400">
+                  {position.projectedProfitAud !== null ? `+$${position.projectedProfitAud.toFixed(2)}` : '—'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <p className="text-xs text-gray-600 italic mb-3">No open position</p>

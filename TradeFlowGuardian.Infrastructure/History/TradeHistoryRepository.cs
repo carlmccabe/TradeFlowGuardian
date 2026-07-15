@@ -23,10 +23,14 @@ public class TradeHistoryRepository(
     private const string InsertSql = """
         INSERT INTO trade_history
             (instrument, direction, entry_price, sl, tp, units,
-             fill_price, order_id, success, error_message, executed_at)
+             fill_price, order_id, success, error_message, executed_at,
+             risk_percent, risk_source, account_balance, risk_amount,
+             atr, stop_distance, stop_source, quote_to_aud, cap_reason)
         VALUES
             (@Instrument, @Direction, @EntryPrice, @StopLoss, @TakeProfit, @Units,
-             @FillPrice, @OrderId, @Success, @ErrorMessage, @ExecutedAt)
+             @FillPrice, @OrderId, @Success, @ErrorMessage, @ExecutedAt,
+             @RiskPercent, @RiskSource, @AccountBalance, @RiskAmount,
+             @Atr, @StopDistance, @StopSource, @QuoteToAud, @CapReason)
         """;
 
     public async Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default)
@@ -81,7 +85,18 @@ public class TradeHistoryRepository(
             e.units                                             AS Units,
             e.executed_at                                       AS OpenedAt,
             c.executed_at                                       AS ClosedAt,
-            EXTRACT(EPOCH FROM (c.executed_at - e.executed_at))::int AS DurationSeconds
+            EXTRACT(EPOCH FROM (c.executed_at - e.executed_at))::int AS DurationSeconds,
+            e.sl                                                AS StopLoss,
+            e.tp                                                AS TakeProfit,
+            e.risk_percent                                      AS RiskPercent,
+            e.risk_source                                       AS RiskSource,
+            e.account_balance                                   AS AccountBalance,
+            e.risk_amount                                       AS RiskAmount,
+            e.atr                                               AS Atr,
+            e.stop_distance                                     AS StopDistance,
+            e.stop_source                                       AS StopSource,
+            e.quote_to_aud                                      AS QuoteToAud,
+            e.cap_reason                                        AS CapReason
         FROM trade_history e
         LEFT JOIN LATERAL (
             SELECT fill_price, executed_at
@@ -95,12 +110,13 @@ public class TradeHistoryRepository(
         ) c ON true
         WHERE e.direction IN ('Long', 'Short')
           AND e.success    = true
-          AND e.executed_at >= NOW() - INTERVAL '1 day' * @Days
+          AND (@From::timestamptz IS NULL OR e.executed_at >= @From)
+          AND (@To::timestamptz   IS NULL OR e.executed_at <  @To)
         ORDER BY e.executed_at DESC
         """;
 
     public async Task<IReadOnlyList<TradeFlowGuardian.Core.Models.PairedTradeRecord>> GetPairedTradesAsync(
-        int days = 90, CancellationToken ct = default)
+        DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
             return [];
@@ -110,7 +126,7 @@ public class TradeHistoryRepository(
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(ct);
             var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.PairedTradeRecord>(
-                PairedTradesSql, new { Days = days });
+                PairedTradesSql, new { From = from, To = to });
             return rows.ToList();
         }
         catch (Exception ex)

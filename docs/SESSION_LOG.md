@@ -13,6 +13,20 @@
 
 ---
 
+### 2026-07-15 (session 2) — Sizing transparency + trade history controls
+- **Sizing audit trail** (`claude/risk-size-adjustment-perf-kj46lk`) — every trade now records exactly how its size was reached
+  - `SizingBreakdown` (Core/Models) — risk %, risk source, account balance, risk amount, ATR, stop distance, stop source, quote→AUD rate, raw units, margin cap, cap reason
+  - `IPositionSizer.CalculateUnitsAsync` returns the breakdown (was bare `long`); PositionSizer also reports which cap bound (`margin-cap` / `max-position-units` / `aborted` / none)
+  - Migration `007_sizing_transparency.sql` — nine nullable columns on `trade_history`; Close signals and pre-migration rows carry NULLs
+  - `SignalExecutionHandler` persists the breakdown with every entry order attempt
+- **Trade history range controls** — `GET /status/trades?range=week|month|quarter|all` (rolling 7/30/90d or everything) or explicit `?from=&to=` UTC dates (to-day inclusive); `GetPairedTradesAsync(from, to)` replaces the days param
+- **Projections** — `/status/trades` and `/status` positions now return `stopLoss`, `takeProfit`, `projectedLossAud`, `projectedProfitAud` (|level − entry| × units × stored quote→AUD; null for pre-transparency trades)
+- **Dashboard**
+  - New **Trades** tab — range chips (Last week/month/quarter, All time) + custom date picker; each trade card shows entry→exit, units, at-stop / at-target AUD with R multiple, OPEN badge, and expands to a plain-English sizing breakdown (risk budget → stop distance → FX conversion → raw size → final size + cap reason)
+  - InstrumentCard (Guard tab) — open positions now show stop/target prices with projected −/+ AUD at each
+  - Orphaned `TradeList.tsx` removed (unused since PR #38)
+- Tests: 69 passing (2 new breakdown tests pin formula components and cap attribution); .NET 10 SDK installed in the session container for local builds
+
 ### 2026-07-15
 - **Optimistic risk stepper** (`claude/risk-size-adjustment-perf-kj46lk`) — dashboard risk ± taps no longer block on the network
   - Previously each tap issued its own PATCH and disabled both buttons until the round trip finished (2.5% → 1.0% = 15 serial requests)

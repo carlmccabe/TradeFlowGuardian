@@ -24,36 +24,97 @@ public class StatusController(
 {
     /// <summary>
     /// Combined status: live balance + all open positions with unrealised P&amp;L.
+    /// Each position is enriched with the SL/TP and sizing breakdown recorded when
+    /// its entry order was placed (null when no matching local history row exists),
+    /// plus projected AUD outcomes at the stop and target.
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetStatus(CancellationToken ct)
     {
         var balance   = await broker.GetAccountBalanceAsync(ct);
         var positions = await broker.GetAllOpenPositionsAsync(ct);
+
+        // Latest still-open entry per instrument from local history (open = no Close fill yet).
+        var recentTrades = await tradeHistory.GetPairedTradesAsync(
+            DateTimeOffset.UtcNow.AddDays(-90), null, ct);
+        var openEntries = recentTrades
+            .Where(t => t.ClosedAt is null)
+            .GroupBy(t => t.Instrument)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(t => t.OpenedAt).First());
+
         return Ok(new
         {
             balanceAud = balance,
-            positions  = positions.Select(p => new
+            positions  = positions.Select(p =>
             {
-                instrument   = p.Instrument,
-                units        = p.Units,
-                unrealizedPL = p.UnrealizedPL,
-                averagePrice = p.AveragePrice,
-                side         = p.Units switch { > 0 => "LONG", < 0 => "SHORT", _ => "FLAT" }
+                openEntries.TryGetValue(p.Instrument, out var entry);
+                return new
+                {
+                    instrument   = p.Instrument,
+                    units        = p.Units,
+                    unrealizedPL = p.UnrealizedPL,
+                    averagePrice = p.AveragePrice,
+                    side         = p.Units switch { > 0 => "LONG", < 0 => "SHORT", _ => "FLAT" },
+                    stopLoss     = entry?.StopLoss,
+                    takeProfit   = entry?.TakeProfit,
+                    projectedLossAud   = ProjectedAud(entry, entry?.StopLoss),
+                    projectedProfitAud = ProjectedAud(entry, entry?.TakeProfit),
+                    riskPercent  = entry?.RiskPercent,
+                    riskAmount   = entry?.RiskAmount
+                };
             }),
             fetchedAt = DateTimeOffset.UtcNow
         });
     }
 
     /// <summary>
-    /// Returns last 90 days of entry+close trade pairs from PostgreSQL.
-    /// ExitPrice and ClosedAt are null for still-open trades.
-    /// P&L figures are in quote currency (no AUD conversion applied here).
+    /// AUD magnitude of the move from entry to <paramref name="level"/> for the trade's units.
+    /// Null when the trade predates sizing transparency (no stored quote→AUD rate).
+    /// </summary>
+    private static decimal? ProjectedAud(PairedTradeRecord? trade, decimal? level)
+    {
+        if (trade is null || level is null || trade.QuoteToAud is null) return null;
+        var entry = trade.EntryPrice > 0 ? trade.EntryPrice : 0m;
+        if (entry <= 0) return null;
+        return Math.Round(Math.Abs(level.Value - entry) * Math.Abs(trade.Units) * trade.QuoteToAud.Value, 2);
+    }
+
+    /// <summary>
+    /// Entry+close trade pairs from PostgreSQL, with the sizing breakdown recorded at
+    /// order time and projected AUD outcomes at the stop and target.
+    /// Window selection: ?range=week|month|quarter|all (rolling 7/30/90 days or everything),
+    /// or explicit ?from=YYYY-MM-DD&amp;to=YYYY-MM-DD (UTC; to is exclusive of that day's end).
+    /// Explicit dates win over range. Default: last 90 days.
     /// </summary>
     [HttpGet("trades")]
-    public async Task<IActionResult> GetTrades(CancellationToken ct)
+    public async Task<IActionResult> GetTrades(
+        [FromQuery] string? range = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        CancellationToken ct = default)
     {
-        var trades = await tradeHistory.GetPairedTradesAsync(90, ct);
+        DateTimeOffset? fromUtc;
+        DateTimeOffset? toUtc = null;
+
+        if (from.HasValue || to.HasValue)
+        {
+            fromUtc = from.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(from.Value, DateTimeKind.Utc)) : null;
+            // 'to' is a date the user wants included — advance to the next midnight (exclusive upper bound).
+            toUtc = to.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(to.Value.Date.AddDays(1), DateTimeKind.Utc)) : null;
+        }
+        else
+        {
+            fromUtc = (range?.ToLowerInvariant()) switch
+            {
+                "week"    => DateTimeOffset.UtcNow.AddDays(-7),
+                "month"   => DateTimeOffset.UtcNow.AddDays(-30),
+                "quarter" => DateTimeOffset.UtcNow.AddDays(-90),
+                "all"     => null,
+                _         => DateTimeOffset.UtcNow.AddDays(-90)
+            };
+        }
+
+        var trades = await tradeHistory.GetPairedTradesAsync(fromUtc, toUtc, ct);
         return Ok(trades.Select(t => new
         {
             instrument      = t.Instrument,
@@ -63,7 +124,23 @@ public class StatusController(
             units           = t.Units,
             openedAt        = t.OpenedAt,
             closedAt        = t.ClosedAt,
-            durationSeconds = t.DurationSeconds
+            durationSeconds = t.DurationSeconds,
+            stopLoss        = t.StopLoss,
+            takeProfit      = t.TakeProfit,
+            projectedLossAud   = ProjectedAud(t, t.StopLoss),
+            projectedProfitAud = ProjectedAud(t, t.TakeProfit),
+            sizing = t.RiskPercent is null ? null : new
+            {
+                riskPercent    = t.RiskPercent,
+                riskSource     = t.RiskSource,
+                accountBalance = t.AccountBalance,
+                riskAmount     = t.RiskAmount,
+                atr            = t.Atr,
+                stopDistance   = t.StopDistance,
+                stopSource     = t.StopSource,
+                quoteToAud     = t.QuoteToAud,
+                capReason      = t.CapReason
+            }
         }));
     }
 

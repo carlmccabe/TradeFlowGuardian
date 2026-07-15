@@ -215,7 +215,8 @@ public class SignalExecutionHandler(
             return;
         }
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance, ct);
+        var sizing = await sizer.CalculateUnitsAsync(signal, balance, ct);
+        var units  = sizing.Units;
         if (units <= 0)
         {
             logger.LogError("Aborting signal for {Instrument}: Position size calculated as {Units} units. Check ATR ({Atr}) and risk configuration (Risk%: {RiskPercent}%, Balance: {Balance:C})",
@@ -322,7 +323,17 @@ public class SignalExecutionHandler(
             OrderId      = result.OrderId,
             Success      = result.Success,
             ErrorMessage = result.Success ? null : result.Message,
-            ExecutedAt   = result.ExecutedAt
+            ExecutedAt   = result.ExecutedAt,
+            // Sizing audit trail — how these units were reached (migration 007)
+            RiskPercent    = sizing.RiskPercent,
+            RiskSource     = sizing.RiskSource,
+            AccountBalance = sizing.AccountBalance,
+            RiskAmount     = sizing.RiskAmount,
+            Atr            = sizing.Atr,
+            StopDistance   = sizing.StopDistance,
+            StopSource     = sizing.StopSource,
+            QuoteToAud     = sizing.QuoteToAud,
+            CapReason      = sizing.CapReason
         }, CancellationToken.None);
 
         if (result.Success)

@@ -15,7 +15,8 @@ public interface ISignalFilter
 
 public interface IPositionSizer
 {
-    Task<long> CalculateUnitsAsync(TradeSignal signal, decimal accountBalance, CancellationToken ct = default);
+    /// <summary>Computes units for a signal, returning the full sizing audit trail (see <see cref="SizingBreakdown"/>).</summary>
+    Task<SizingBreakdown> CalculateUnitsAsync(TradeSignal signal, decimal accountBalance, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -79,7 +80,12 @@ public interface ITradeHistoryRepository
 {
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
     Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(int days = 90, CancellationToken ct = default);
+    /// <summary>
+    /// Returns entry+close trade pairs whose entry executed inside [from, to).
+    /// Null <paramref name="from"/> means no lower bound (all time); null <paramref name="to"/> means up to now.
+    /// Rows include the persisted sizing breakdown columns (null for pre-transparency trades).
+    /// </summary>
+    Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default);
 
     /// <summary>
     /// Returns realized P&amp;L grouped by UTC day for the current week or month

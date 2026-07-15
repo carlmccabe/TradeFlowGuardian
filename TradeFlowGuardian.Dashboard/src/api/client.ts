@@ -27,6 +27,14 @@ export interface PositionResponse {
   unrealizedPL: number
   averagePrice: number
   side: 'LONG' | 'SHORT' | 'FLAT'
+  // From the entry order's local history row; null when no matching row exists
+  // (manual trades, or trades placed before sizing transparency).
+  stopLoss: number | null
+  takeProfit: number | null
+  projectedLossAud: number | null    // AUD lost if the stop is hit
+  projectedProfitAud: number | null  // AUD gained if the target is hit
+  riskPercent: number | null
+  riskAmount: number | null
 }
 
 export interface StatusResponse {
@@ -59,6 +67,18 @@ export interface RiskSettingsResponse {
 
 // ── Trades ────────────────────────────────────────────────────────────────────
 
+export interface TradeSizing {
+  riskPercent: number
+  riskSource: string       // 'signal-override' | 'db' | 'config-default'
+  accountBalance: number   // AUD at sizing time
+  riskAmount: number       // AUD at risk = balance × risk%
+  atr: number
+  stopDistance: number
+  stopSource: string       // 'signal-sl' | 'atr×N'
+  quoteToAud: number
+  capReason: string | null // null | 'margin-cap' | 'max-position-units' | 'aborted'
+}
+
 export interface TradeRecord {
   instrument: string
   direction: 'Long' | 'Short'
@@ -68,7 +88,14 @@ export interface TradeRecord {
   openedAt: string
   closedAt: string | null
   durationSeconds: number | null
+  stopLoss: number | null
+  takeProfit: number | null
+  projectedLossAud: number | null
+  projectedProfitAud: number | null
+  sizing: TradeSizing | null  // null for trades placed before migration 007
 }
+
+export type TradesRange = 'week' | 'month' | 'quarter' | 'all'
 
 export interface DailyPnlRecord {
   date: string        // "YYYY-MM-DD" — the UTC day the trade was closed (P&L realized)
@@ -161,7 +188,17 @@ export const api = {
 
   getFilterStatus: () => request<FilterStatusResponse>('/status/filters'),
 
-  getTrades: () => request<TradeRecord[]>('/status/trades'),
+  getTrades: (opts?: { range?: TradesRange; from?: string; to?: string }) => {
+    const q = new URLSearchParams()
+    if (opts?.from || opts?.to) {
+      if (opts.from) q.set('from', opts.from)
+      if (opts.to) q.set('to', opts.to)
+    } else if (opts?.range) {
+      q.set('range', opts.range)
+    }
+    const qs = q.toString()
+    return request<TradeRecord[]>(`/status/trades${qs ? `?${qs}` : ''}`)
+  },
 
   getPnl: (range: PnlRange) =>
     request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
