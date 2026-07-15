@@ -6,6 +6,10 @@ using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Core.Models;
+using TradeFlowGuardian.Infrastructure.Data;
+using StackExchange.Redis;
+using System.Reflection;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
@@ -17,42 +21,249 @@ public class StatusController(
     IPauseState pauseState,
     IDailyDrawdownGuard drawdownGuard,
     ITradeHistoryRepository tradeHistory,
+    IRiskSettingsRepository riskSettingsRepo,
+    IActiveAccountProvider activeAccount,
+    IConnectionMultiplexer redis,
     IOptions<RiskConfig> risk,
     IHubContext<TradingHub> hub,
     ILogger<StatusController> logger) : ControllerBase
 {
+    private static readonly DateTimeOffset StartedAt = DateTimeOffset.UtcNow;
+
+    private static string GitSha =>
+        Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
+        ?? Environment.GetEnvironmentVariable("GIT_SHA")
+        ?? "unknown";
+
+    /// <summary>
+    /// Identifies the running Api build: git SHA, start time, and the active broker
+    /// account's environment. First stop after a deploy — does the SHA match what you merged?
+    /// </summary>
+    [HttpGet("version")]
+    public async Task<IActionResult> GetVersion(CancellationToken ct)
+    {
+        string? accountEnv = null, accountLabel = null;
+        try
+        {
+            var acct = await activeAccount.GetActiveAsync(ct);
+            accountEnv   = acct.Environment;
+            accountLabel = acct.Label;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Version endpoint could not resolve active account");
+        }
+
+        return Ok(new
+        {
+            service      = "api",
+            sha          = GitSha,
+            startedAt    = StartedAt,
+            uptimeSeconds = (long)(DateTimeOffset.UtcNow - StartedAt).TotalSeconds,
+            accountEnvironment = accountEnv,
+            accountLabel,
+            isLive       = accountEnv == "fxtrade",
+            fetchedAt    = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Deploy readiness: exercises every dependency the trade pipeline needs and reports
+    /// each check individually — Postgres + schema version vs the migrations shipped in
+    /// this build, Redis, broker balance, per-instrument risk settings (the rows the sizer
+    /// reads; a missing row silently falls back to the config default), and the Worker
+    /// heartbeat with the SHA it is running. ok=true only when everything passes.
+    /// </summary>
+    [HttpGet("readiness")]
+    public async Task<IActionResult> GetReadiness(CancellationToken ct)
+    {
+        // Postgres + schema level
+        var (dbReachable, _, dbError) = await tradeHistory.GetStatusAsync(ct);
+        var appliedVersion  = await tradeHistory.GetSchemaVersionAsync(ct);
+        int? expectedVersion = null;
+        try
+        {
+            expectedVersion = SqlMigrationRunner.LoadEmbedded(Assembly.GetExecutingAssembly())
+                .Select(m => m.Version).DefaultIfEmpty(0).Max();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not enumerate embedded migrations");
+        }
+        var schemaCurrent = appliedVersion is not null && appliedVersion == expectedVersion;
+
+        // Redis
+        bool redisOk = false; string? redisError = null;
+        try { await redis.GetDatabase().PingAsync(); redisOk = true; }
+        catch (Exception ex) { redisError = ex.Message; }
+
+        // Broker + account
+        string? accountEnv = null, accountLabel = null; decimal balance = 0;
+        string? brokerError = null;
+        try
+        {
+            var acct = await activeAccount.GetActiveAsync(ct);
+            accountEnv   = acct.Environment;
+            accountLabel = acct.Label;
+            balance      = await broker.GetAccountBalanceAsync(ct);
+        }
+        catch (Exception ex) { brokerError = ex.Message; }
+        var brokerOk = brokerError is null && balance > 0;
+
+        // Risk settings — the exact rows PositionSizer reads. No row for an instrument
+        // means the sizer silently falls back to the config default risk %.
+        var riskRows = await riskSettingsRepo.GetAllAsync(ct);
+        var riskOk = riskRows.Count > 0;
+
+        // Worker heartbeat
+        object? worker = null; var workerOk = false;
+        try
+        {
+            var raw = await redis.GetDatabase().StringGetAsync("tradeflow:worker:heartbeat");
+            if (raw.HasValue)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse((string)raw!);
+                var beatAt = doc.RootElement.GetProperty("beatAt").GetDateTimeOffset();
+                var age    = (DateTimeOffset.UtcNow - beatAt).TotalSeconds;
+                workerOk   = age < 60;
+                worker = new
+                {
+                    sha = doc.RootElement.GetProperty("sha").GetString(),
+                    startedAt = doc.RootElement.GetProperty("startedAt").GetDateTimeOffset(),
+                    beatAgeSeconds = Math.Round(age, 1),
+                    healthy = workerOk
+                };
+            }
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Could not read worker heartbeat"); }
+
+        var ok = dbReachable && schemaCurrent && redisOk && brokerOk && riskOk && workerOk;
+
+        return Ok(new
+        {
+            ok,
+            api = new { sha = GitSha, startedAt = StartedAt },
+            worker = worker ?? (object)new { healthy = false, error = "no heartbeat in Redis (worker down or old build without heartbeat)" },
+            postgres = new { reachable = dbReachable, error = dbError, appliedMigration = appliedVersion, expectedMigration = expectedVersion, schemaCurrent },
+            redis = new { reachable = redisOk, error = redisError },
+            broker = new { reachable = brokerOk, error = brokerError, balanceAud = balance, accountEnvironment = accountEnv, accountLabel, isLive = accountEnv == "fxtrade" },
+            riskSettings = new
+            {
+                ok = riskOk,
+                note = riskOk ? null : "no rows — PositionSizer will fall back to config default risk %",
+                instruments = riskRows.Select(r => new { r.Instrument, r.RiskPercent, r.IsActive, source = "db" })
+            },
+            fetchedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Fetches a dry-run signal's outcome by its idempotency key. The Worker stores results
+    /// for 15 minutes. 404 until the Worker has processed the signal — poll after POSTing
+    /// a signal with "dryRun": true.
+    /// </summary>
+    [HttpGet("dryrun/{key}")]
+    public async Task<IActionResult> GetDryRunResult(string key, CancellationToken ct)
+    {
+        var raw = await redis.GetDatabase().StringGetAsync($"tradeflow:dryrun:{key}");
+        if (!raw.HasValue)
+            return NotFound(new { error = "no result yet — worker still processing, or key unknown/expired (15 min TTL)", key });
+        return Content((string)raw!, "application/json");
+    }
+
     /// <summary>
     /// Combined status: live balance + all open positions with unrealised P&amp;L.
+    /// Each position is enriched with the SL/TP and sizing breakdown recorded when
+    /// its entry order was placed (null when no matching local history row exists),
+    /// plus projected AUD outcomes at the stop and target.
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetStatus(CancellationToken ct)
     {
         var balance   = await broker.GetAccountBalanceAsync(ct);
         var positions = await broker.GetAllOpenPositionsAsync(ct);
+
+        // Latest still-open entry per instrument from local history (open = no Close fill yet).
+        var recentTrades = await tradeHistory.GetPairedTradesAsync(
+            DateTimeOffset.UtcNow.AddDays(-90), null, ct);
+        var openEntries = recentTrades
+            .Where(t => t.ClosedAt is null)
+            .GroupBy(t => t.Instrument)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(t => t.OpenedAt).First());
+
         return Ok(new
         {
             balanceAud = balance,
-            positions  = positions.Select(p => new
+            positions  = positions.Select(p =>
             {
-                instrument   = p.Instrument,
-                units        = p.Units,
-                unrealizedPL = p.UnrealizedPL,
-                averagePrice = p.AveragePrice,
-                side         = p.Units switch { > 0 => "LONG", < 0 => "SHORT", _ => "FLAT" }
+                openEntries.TryGetValue(p.Instrument, out var entry);
+                return new
+                {
+                    instrument   = p.Instrument,
+                    units        = p.Units,
+                    unrealizedPL = p.UnrealizedPL,
+                    averagePrice = p.AveragePrice,
+                    side         = p.Units switch { > 0 => "LONG", < 0 => "SHORT", _ => "FLAT" },
+                    stopLoss     = entry?.StopLoss,
+                    takeProfit   = entry?.TakeProfit,
+                    projectedLossAud   = ProjectedAud(entry, entry?.StopLoss),
+                    projectedProfitAud = ProjectedAud(entry, entry?.TakeProfit),
+                    riskPercent  = entry?.RiskPercent,
+                    riskAmount   = entry?.RiskAmount
+                };
             }),
             fetchedAt = DateTimeOffset.UtcNow
         });
     }
 
     /// <summary>
-    /// Returns last 90 days of entry+close trade pairs from PostgreSQL.
-    /// ExitPrice and ClosedAt are null for still-open trades.
-    /// P&L figures are in quote currency (no AUD conversion applied here).
+    /// AUD magnitude of the move from entry to <paramref name="level"/> for the trade's units.
+    /// Null when the trade predates sizing transparency (no stored quote→AUD rate).
+    /// </summary>
+    private static decimal? ProjectedAud(PairedTradeRecord? trade, decimal? level)
+    {
+        if (trade is null || level is null || trade.QuoteToAud is null) return null;
+        var entry = trade.EntryPrice > 0 ? trade.EntryPrice : 0m;
+        if (entry <= 0) return null;
+        return Math.Round(Math.Abs(level.Value - entry) * Math.Abs(trade.Units) * trade.QuoteToAud.Value, 2);
+    }
+
+    /// <summary>
+    /// Entry+close trade pairs from PostgreSQL, with the sizing breakdown recorded at
+    /// order time and projected AUD outcomes at the stop and target.
+    /// Window selection: ?range=week|month|quarter|all (rolling 7/30/90 days or everything),
+    /// or explicit ?from=YYYY-MM-DD&amp;to=YYYY-MM-DD (UTC; to is exclusive of that day's end).
+    /// Explicit dates win over range. Default: last 90 days.
     /// </summary>
     [HttpGet("trades")]
-    public async Task<IActionResult> GetTrades(CancellationToken ct)
+    public async Task<IActionResult> GetTrades(
+        [FromQuery] string? range = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        CancellationToken ct = default)
     {
-        var trades = await tradeHistory.GetPairedTradesAsync(90, ct);
+        DateTimeOffset? fromUtc;
+        DateTimeOffset? toUtc = null;
+
+        if (from.HasValue || to.HasValue)
+        {
+            fromUtc = from.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(from.Value, DateTimeKind.Utc)) : null;
+            // 'to' is a date the user wants included — advance to the next midnight (exclusive upper bound).
+            toUtc = to.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(to.Value.Date.AddDays(1), DateTimeKind.Utc)) : null;
+        }
+        else
+        {
+            fromUtc = (range?.ToLowerInvariant()) switch
+            {
+                "week"    => DateTimeOffset.UtcNow.AddDays(-7),
+                "month"   => DateTimeOffset.UtcNow.AddDays(-30),
+                "quarter" => DateTimeOffset.UtcNow.AddDays(-90),
+                "all"     => null,
+                _         => DateTimeOffset.UtcNow.AddDays(-90)
+            };
+        }
+
+        var trades = await tradeHistory.GetPairedTradesAsync(fromUtc, toUtc, ct);
         return Ok(trades.Select(t => new
         {
             instrument      = t.Instrument,
@@ -62,7 +273,23 @@ public class StatusController(
             units           = t.Units,
             openedAt        = t.OpenedAt,
             closedAt        = t.ClosedAt,
-            durationSeconds = t.DurationSeconds
+            durationSeconds = t.DurationSeconds,
+            stopLoss        = t.StopLoss,
+            takeProfit      = t.TakeProfit,
+            projectedLossAud   = ProjectedAud(t, t.StopLoss),
+            projectedProfitAud = ProjectedAud(t, t.TakeProfit),
+            sizing = t.RiskPercent is null ? null : new
+            {
+                riskPercent    = t.RiskPercent,
+                riskSource     = t.RiskSource,
+                accountBalance = t.AccountBalance,
+                riskAmount     = t.RiskAmount,
+                atr            = t.Atr,
+                stopDistance   = t.StopDistance,
+                stopSource     = t.StopSource,
+                quoteToAud     = t.QuoteToAud,
+                capReason      = t.CapReason
+            }
         }));
     }
 
@@ -81,15 +308,19 @@ public class StatusController(
     }
 
     /// <summary>
-    /// Realized P&amp;L grouped by UTC day (range=daily, 30 days) or ISO week (range=weekly, 13 weeks).
-    /// Each bucket includes only fully-closed trades (entry fill paired with a Close fill).
-    /// Returns an empty array when there is no matching trade history — never an error.
+    /// Realized P&amp;L per UTC day for the current week (range=week, Monday→now) or the
+    /// current month (range=month, 1st→now). Buckets by the trade's close date, so each
+    /// bucket reflects P&amp;L actually realized that day. Only fully-closed trades count
+    /// (entry fill paired with a Close fill). Returns an empty array when there is no
+    /// matching trade history — never an error.
     /// </summary>
     [HttpGet("pnl")]
-    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "daily", CancellationToken ct = default)
+    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "week", CancellationToken ct = default)
     {
-        var weekly = "weekly".Equals(range, StringComparison.OrdinalIgnoreCase);
-        var data   = await tradeHistory.GetDailyPnlAsync(weekly, ct);
+        var pnlRange = "month".Equals(range, StringComparison.OrdinalIgnoreCase)
+            ? PnlRange.Month
+            : PnlRange.Week;
+        var data = await tradeHistory.GetDailyPnlAsync(pnlRange, ct);
         return Ok(data.Select(d => new
         {
             date       = d.Date,

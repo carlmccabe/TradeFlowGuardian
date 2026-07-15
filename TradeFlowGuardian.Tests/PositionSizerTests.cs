@@ -88,7 +88,7 @@ public class PositionSizerTests
             IdempotencyKey = "test-usdjpy-1"
         };
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance);
+        var units = (await sizer.CalculateUnitsAsync(signal, balance)).Units;
 
         // stopDistance = 0.70 (from SL, not ATR×2 = 2.0)
         // riskAmount / lossPerUnit = 150 / (0.70/98) ≈ 21,000
@@ -119,7 +119,7 @@ public class PositionSizerTests
             IdempotencyKey = "test-usdjpy-margincap"
         };
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance);
+        var units = (await sizer.CalculateUnitsAsync(signal, balance)).Units;
 
         // marginCap ≈ 55,059; risk size ≈ 21,000 — risk path wins
         Assert.True(units < 55_059L,
@@ -154,7 +154,7 @@ public class PositionSizerTests
             IdempotencyKey = "test-usdjpy-atr"
         };
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance);
+        var units = (await sizer.CalculateUnitsAsync(signal, balance)).Units;
 
         Assert.Equal(9_800L, units);
     }
@@ -190,7 +190,7 @@ public class PositionSizerTests
             IdempotencyKey = "test-usdjpy-capbinding"
         };
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance);
+        var units = (await sizer.CalculateUnitsAsync(signal, balance)).Units;
 
         // Exact marginCap = 2,800 / (149.50 / 2,940) = 2,800 / 0.050850... ≈ 55,059
         const long expectedMarginCap = 55_059L;
@@ -217,8 +217,71 @@ public class PositionSizerTests
             IdempotencyKey = "test-usdjpy-zero"
         };
 
-        var units = await sizer.CalculateUnitsAsync(signal, 10_000m);
+        var units = (await sizer.CalculateUnitsAsync(signal, 10_000m)).Units;
 
         Assert.Equal(0L, units);
+    }
+
+    // ── sizing breakdown audit trail ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Breakdown_ExposesFormulaComponents_AndCapReason()
+    {
+        // Same inputs as UsdJpy_MarginCapBinds_WhenRiskSizeExceedsIt — the margin cap
+        // binds, so the breakdown must say so and carry every formula component.
+        const decimal audJpy  = 98m;
+        const decimal balance = 10_000m;
+
+        var oanda  = OandaWithAudJpy(audJpy);
+        var sizer  = BuildSizer(oanda, defaultRiskPct: 50.0m);
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 149.45m,
+            Atr            = 0.5m,
+            RiskPercent    = 50m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-breakdown"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, balance);
+
+        Assert.Equal(50m, b.RiskPercent);
+        Assert.Equal("signal-override", b.RiskSource);
+        Assert.Equal(balance, b.AccountBalance);
+        Assert.Equal(5_000m, b.RiskAmount);                     // 10,000 × 50%
+        Assert.Equal(0.05m, b.StopDistance);                    // |149.50 − 149.45|
+        Assert.Equal("signal-sl", b.StopSource);
+        Assert.Equal(1m / 98m, b.QuoteToAud, precision: 8);
+        Assert.Equal(0.05m / 98m, b.LossPerUnit, precision: 8);
+        Assert.True(b.RawUnits > b.MarginCapUnits, "raw size should exceed the margin cap");
+        Assert.Equal("margin-cap", b.CapReason);
+        Assert.Equal(b.Units, (long)Math.Round(b.MarginCapUnits));
+    }
+
+    [Fact]
+    public async Task Breakdown_NoCapReason_WhenRiskSizeWins()
+    {
+        var oanda  = OandaWithAudJpy(98m);
+        var sizer  = BuildSizer(oanda);
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 148.80m,
+            Atr            = 1.0m,
+            RiskPercent    = 1.5m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-nocap"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, 10_000m);
+
+        Assert.Null(b.CapReason);
+        Assert.Equal(21_000L, b.Units);
+        Assert.Equal(150m, b.RiskAmount);                       // 10,000 × 1.5%
     }
 }

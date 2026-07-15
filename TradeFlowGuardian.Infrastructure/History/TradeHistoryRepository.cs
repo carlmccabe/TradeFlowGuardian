@@ -23,10 +23,14 @@ public class TradeHistoryRepository(
     private const string InsertSql = """
         INSERT INTO trade_history
             (instrument, direction, entry_price, sl, tp, units,
-             fill_price, order_id, success, error_message, executed_at)
+             fill_price, order_id, success, error_message, executed_at,
+             risk_percent, risk_source, account_balance, risk_amount,
+             atr, stop_distance, stop_source, quote_to_aud, cap_reason)
         VALUES
             (@Instrument, @Direction, @EntryPrice, @StopLoss, @TakeProfit, @Units,
-             @FillPrice, @OrderId, @Success, @ErrorMessage, @ExecutedAt)
+             @FillPrice, @OrderId, @Success, @ErrorMessage, @ExecutedAt,
+             @RiskPercent, @RiskSource, @AccountBalance, @RiskAmount,
+             @Atr, @StopDistance, @StopSource, @QuoteToAud, @CapReason)
         """;
 
     public async Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default)
@@ -72,6 +76,24 @@ public class TradeHistoryRepository(
         }
     }
 
+    public async Task<int?> GetSchemaVersionAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            return null;
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(ct);
+            return await conn.ExecuteScalarAsync<int?>("SELECT MAX(version) FROM schema_versions");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to read schema version");
+            return null;
+        }
+    }
+
     private const string PairedTradesSql = """
         SELECT
             e.instrument                                        AS Instrument,
@@ -81,7 +103,18 @@ public class TradeHistoryRepository(
             e.units                                             AS Units,
             e.executed_at                                       AS OpenedAt,
             c.executed_at                                       AS ClosedAt,
-            EXTRACT(EPOCH FROM (c.executed_at - e.executed_at))::int AS DurationSeconds
+            EXTRACT(EPOCH FROM (c.executed_at - e.executed_at))::int AS DurationSeconds,
+            e.sl                                                AS StopLoss,
+            e.tp                                                AS TakeProfit,
+            e.risk_percent                                      AS RiskPercent,
+            e.risk_source                                       AS RiskSource,
+            e.account_balance                                   AS AccountBalance,
+            e.risk_amount                                       AS RiskAmount,
+            e.atr                                               AS Atr,
+            e.stop_distance                                     AS StopDistance,
+            e.stop_source                                       AS StopSource,
+            e.quote_to_aud                                      AS QuoteToAud,
+            e.cap_reason                                        AS CapReason
         FROM trade_history e
         LEFT JOIN LATERAL (
             SELECT fill_price, executed_at
@@ -95,12 +128,13 @@ public class TradeHistoryRepository(
         ) c ON true
         WHERE e.direction IN ('Long', 'Short')
           AND e.success    = true
-          AND e.executed_at >= NOW() - INTERVAL '1 day' * @Days
+          AND (@From::timestamptz IS NULL OR e.executed_at >= @From)
+          AND (@To::timestamptz   IS NULL OR e.executed_at <  @To)
         ORDER BY e.executed_at DESC
         """;
 
     public async Task<IReadOnlyList<TradeFlowGuardian.Core.Models.PairedTradeRecord>> GetPairedTradesAsync(
-        int days = 90, CancellationToken ct = default)
+        DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
             return [];
@@ -110,7 +144,7 @@ public class TradeHistoryRepository(
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(ct);
             var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.PairedTradeRecord>(
-                PairedTradesSql, new { Days = days });
+                PairedTradesSql, new { From = from, To = to });
             return rows.ToList();
         }
         catch (Exception ex)
@@ -120,14 +154,14 @@ public class TradeHistoryRepository(
         }
     }
 
-    // Daily P&L: pairs each Long/Short entry with its next Close fill, groups by UTC day or ISO week.
+    // Daily realized P&L: pairs each Long/Short entry with its next Close fill, then groups
+    // by the UTC day the trade was CLOSED (the day the P&L was realized) so a trade entered
+    // last period but closed this period lands in this period. The window is bounded by the
+    // close date >= @Start, where @Start is the current week's Monday or month's 1st (UTC).
     // Units are always positive in the DB (sizer returns positive; OandaBrokerClient negates for shorts).
-    private static readonly string DailyPnlSqlDay = BuildDailyPnlSql("day");
-    private static readonly string DailyPnlSqlWeek = BuildDailyPnlSql("week");
-
-    private static string BuildDailyPnlSql(string bucket) => $"""
+    private const string DailyPnlSql = """
         SELECT
-            TO_CHAR(DATE_TRUNC('{bucket}', e.executed_at), 'YYYY-MM-DD') AS "Date",
+            TO_CHAR(DATE_TRUNC('day', c.executed_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS "Date",
             SUM(
                 CASE e.direction
                     WHEN 'Long'  THEN (c.fill_price - e.fill_price) * e.units
@@ -138,7 +172,7 @@ public class TradeHistoryRepository(
             COUNT(*)::int AS "TradeCount"
         FROM trade_history e
         JOIN LATERAL (
-            SELECT fill_price
+            SELECT fill_price, executed_at
             FROM trade_history c2
             WHERE c2.instrument  = e.instrument
               AND c2.direction   = 'Close'
@@ -151,13 +185,13 @@ public class TradeHistoryRepository(
         WHERE e.direction IN ('Long', 'Short')
           AND e.success     = true
           AND e.fill_price IS NOT NULL
-          AND e.executed_at >= NOW() - INTERVAL '1 day' * @Days
+          AND c.executed_at >= @Start
         GROUP BY 1
         ORDER BY 1 ASC
         """;
 
     public async Task<IReadOnlyList<TradeFlowGuardian.Core.Models.DailyPnlRecord>> GetDailyPnlAsync(
-        bool weekly = false, CancellationToken ct = default)
+        TradeFlowGuardian.Core.Models.PnlRange range, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(_connectionString))
             return [];
@@ -166,9 +200,8 @@ public class TradeHistoryRepository(
         {
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync(ct);
-            var sql  = weekly ? DailyPnlSqlWeek : DailyPnlSqlDay;
-            var days = weekly ? 91 : 30;
-            var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.DailyPnlRecord>(sql, new { Days = days });
+            var rows = await conn.QueryAsync<TradeFlowGuardian.Core.Models.DailyPnlRecord>(
+                DailyPnlSql, new { Start = PeriodStartUtc(range) });
             return rows.ToList();
         }
         catch (Exception ex)
@@ -178,4 +211,18 @@ public class TradeHistoryRepository(
         }
     }
 
+    /// <summary>
+    /// First instant (UTC) of the current week (Monday 00:00) or month (1st 00:00).
+    /// Matches the window the dashboard renders so chart totals reconcile exactly.
+    /// </summary>
+    private static DateTime PeriodStartUtc(TradeFlowGuardian.Core.Models.PnlRange range)
+    {
+        var today = DateTime.UtcNow.Date;
+        if (range == TradeFlowGuardian.Core.Models.PnlRange.Month)
+            return new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        // Monday-based week. DayOfWeek: Sunday = 0 … Saturday = 6.
+        var daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
+        return DateTime.SpecifyKind(today.AddDays(-daysSinceMonday), DateTimeKind.Utc);
+    }
 }

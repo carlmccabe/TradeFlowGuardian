@@ -13,6 +13,43 @@
 
 ---
 
+### 2026-07-15 (session 3) — Deploy verification: version, readiness, dry-run signals
+- **Why**: a deploy once shipped with risk % silently falling back to config default instead of the DB; with real money, every deploy needs positive proof of what's running
+- **`GET /api/status/version`** — api git SHA (`RAILWAY_GIT_COMMIT_SHA`/`GIT_SHA`), start time, active account label + environment (practice/LIVE)
+- **`GET /api/status/readiness`** — exercises every pipeline dependency and reports each: Postgres reachable + applied vs expected migration (enumerated from the build's embedded SQL), Redis ping, broker balance + account, per-instrument risk rows (the exact rows PositionSizer reads — missing rows are called out as "will fall back to config default"), Worker heartbeat + its SHA (mismatch with api SHA flagged)
+- **Worker heartbeat** — `WorkerHeartbeatService` writes `tradeflow:worker:heartbeat` (sha, startedAt, beatAt) every 15s, 60s TTL; a dead worker surfaces within a minute
+- **Dry-run signals** — `"dryRun": true` on the webhook payload runs the FULL pipeline (queue → worker → filters → DB risk lookup → live balance → sizing → SL/TP validation) and stops before order placement; no history write, no idempotency registration (repeatable), no drawdown marking; verdict stored at `tradeflow:dryrun:{key}` (15 min) with stage, wouldTrade, outcome, and the complete sizing breakdown incl. riskSource; fetched via `GET /api/status/dryrun/{key}`
+- **`scripts/verify-deploy.sh`** — one command post-deploy: version → readiness (hard-fails on any unhealthy dependency, incl. schema behind) → live-priced dry-run; explicitly fails if riskSource ≠ "db" (the original incident)
+- **Dashboard System panel** (Guard tab) — PRACTICE/LIVE badge, api+worker SHAs with heartbeat age and mismatch warning, schema applied/expected, per-instrument risk-from-db line, and a "Test pipeline" button that fires a dry run (uses the stored admin secret) and renders the verdict incl. risk source
+- Smoke-tested locally end-to-end: Api+Worker against real Redis — version/readiness endpoints correct, dry-run round trip (POST → stream → worker → Redis verdict → GET) confirmed, no order path touched; 69/69 tests pass
+
+### 2026-07-15 (session 2) — Sizing transparency + trade history controls
+- **Sizing audit trail** (`claude/risk-size-adjustment-perf-kj46lk`) — every trade now records exactly how its size was reached
+  - `SizingBreakdown` (Core/Models) — risk %, risk source, account balance, risk amount, ATR, stop distance, stop source, quote→AUD rate, raw units, margin cap, cap reason
+  - `IPositionSizer.CalculateUnitsAsync` returns the breakdown (was bare `long`); PositionSizer also reports which cap bound (`margin-cap` / `max-position-units` / `aborted` / none)
+  - Migration `007_sizing_transparency.sql` — nine nullable columns on `trade_history`; Close signals and pre-migration rows carry NULLs
+  - `SignalExecutionHandler` persists the breakdown with every entry order attempt
+- **Trade history range controls** — `GET /status/trades?range=week|month|quarter|all` (rolling 7/30/90d or everything) or explicit `?from=&to=` UTC dates (to-day inclusive); `GetPairedTradesAsync(from, to)` replaces the days param
+- **Projections** — `/status/trades` and `/status` positions now return `stopLoss`, `takeProfit`, `projectedLossAud`, `projectedProfitAud` (|level − entry| × units × stored quote→AUD; null for pre-transparency trades)
+- **Dashboard**
+  - New **Trades** tab — range chips (Last week/month/quarter, All time) + custom date picker; each trade card shows entry→exit, units, at-stop / at-target AUD with R multiple, OPEN badge, and expands to a plain-English sizing breakdown (risk budget → stop distance → FX conversion → raw size → final size + cap reason)
+  - InstrumentCard (Guard tab) — open positions now show stop/target prices with projected −/+ AUD at each
+  - Orphaned `TradeList.tsx` removed (unused since PR #38)
+- Tests: 69 passing (2 new breakdown tests pin formula components and cap attribution); .NET 10 SDK installed in the session container for local builds
+
+### 2026-07-15
+- **Optimistic risk stepper** (`claude/risk-size-adjustment-perf-kj46lk`) — dashboard risk ± taps no longer block on the network
+  - Previously each tap issued its own PATCH and disabled both buttons until the round trip finished (2.5% → 1.0% = 15 serial requests)
+  - Now taps update the displayed value instantly; one debounced PATCH (500ms after the last tap) commits the final value
+  - Value shows amber while unconfirmed, emerald once the server acks; commit sequence counter discards stale responses; on error it reverts to the last server value (10s poll reconciles)
+  - Debounced value is flushed on unmount so switching tabs mid-adjustment doesn't drop it
+  - Dashboard build clean; pre-existing lint error in useSignalR.ts untouched
+
+### Next session goals
+- GitHub Actions CI/CD pipeline
+- Cloudflare DNS + SSL
+- P&L chart polish / SignalR real-time push completion
+
 ### 2026-04-10
 - Scaffolded solution, all 4 projects
 - Migrated to .NET 10
@@ -330,3 +367,13 @@
   - Migration `005_broker_column.sql` — additive `broker` discriminator on oanda_accounts (default 'oanda'), not yet read by code
   - 6 new `OandaBrokerClientMappingTests` pin the exact outgoing OANDA wire requests (capturing HttpMessageHandler) — 67/67 passing
   - `docs/BROKER_ABSTRACTION.md` — port surface, canonical EUR_USD instrument format, new-adapter checklist, deferred follow-ups
+
+### 2026-06-23
+- **P&L dashboard — current week / month view** (`claude/pnl-weekly-monthly-display-xjnin8`) — reframed the P&L tab from trailing daily(30d)/weekly(13w) bars to "how is *this* week/month going"
+  - Toggle is now **Week** (current Mon–Sun) / **Month** (current calendar month); everything (chart, headline total, win rate, per-pair breakdown, trade list) is scoped to the selected period
+  - `GET /api/status/pnl?range=week|month` — `GetDailyPnlAsync(PnlRange)` replaces the old `bool weekly`; buckets by the trade's **close** date (P&L realized that day) instead of entry date, and bounds the window by `close >= @Start` (Monday/1st, UTC)
+  - `DATE_TRUNC('day', c.executed_at AT TIME ZONE 'UTC')` — day grouping pinned to UTC so it lines up with the dashboard's UTC day frame regardless of DB session timezone
+  - `@Start` computed in C# (`PeriodStartUtc`) to exactly match the window the frontend renders, so the headline total reconciles with the sum of the bars
+  - New `PnlRange` enum in Core; `DailyPnlRecord.Date` doc updated (now the close day)
+  - Frontend: `PnlChart` rewritten as a diverging bar chart (zero baseline, gains up / losses down, today highlighted, no-trade days flat, future days empty); `PnlTab` zero-fills the full period frame and shows a headline summary (big total + trades/win%/best day)
+  - Dashboard `npm run build` clean (tsc + vite); no test mocks referenced the old repo signature

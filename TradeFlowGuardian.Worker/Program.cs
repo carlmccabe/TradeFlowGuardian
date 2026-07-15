@@ -116,6 +116,7 @@ builder.Services.AddScoped<ISignalFilter, CompositeSignalFilter>(sp =>
 // ── Worker ────────────────────────────────────────────────────────────────────
 builder.Services.AddScoped<SignalExecutionHandler>();
 builder.Services.AddHostedService<ExecutionWorker>();
+builder.Services.AddHostedService<TradeFlowGuardian.Worker.Services.WorkerHeartbeatService>();
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 // Railway sends SIGTERM and waits 30 s before SIGKILL. Give in-flight order

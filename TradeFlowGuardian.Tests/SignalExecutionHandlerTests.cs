@@ -160,7 +160,7 @@ public class SignalExecutionHandlerTests
 
         _sizerMock.Setup(x =>
                 x.CalculateUnitsAsync(It.IsAny<TradeSignal>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1000L);
+            .ReturnsAsync(new SizingBreakdown { Units = 1000L });
 
         _oandaMock.Setup(x => x.PlaceMarketOrderAsync(It.IsAny<TradeSignal>(), It.IsAny<decimal>(), It.IsAny<decimal>(),
                 It.IsAny<long>(), It.IsAny<CancellationToken>()))
@@ -225,7 +225,7 @@ public class SignalExecutionHandlerTests
 
         _sizerMock.Setup(x =>
                 x.CalculateUnitsAsync(It.IsAny<TradeSignal>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1000L);
+            .ReturnsAsync(new SizingBreakdown { Units = 1000L });
 
         // Act
         await handler.HandleAsync(signal, CancellationToken.None);
@@ -278,7 +278,7 @@ public class SignalExecutionHandlerTests
 
         _sizerMock.Setup(x =>
                 x.CalculateUnitsAsync(It.IsAny<TradeSignal>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(1000L);
+            .ReturnsAsync(new SizingBreakdown { Units = 1000L });
 
         _oandaMock.Setup(x => x.PlaceMarketOrderAsync(It.IsAny<TradeSignal>(), It.IsAny<decimal>(), It.IsAny<decimal>(),
                 It.IsAny<long>(), It.IsAny<CancellationToken>()))

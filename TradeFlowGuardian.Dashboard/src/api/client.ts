@@ -27,6 +27,14 @@ export interface PositionResponse {
   unrealizedPL: number
   averagePrice: number
   side: 'LONG' | 'SHORT' | 'FLAT'
+  // From the entry order's local history row; null when no matching row exists
+  // (manual trades, or trades placed before sizing transparency).
+  stopLoss: number | null
+  takeProfit: number | null
+  projectedLossAud: number | null    // AUD lost if the stop is hit
+  projectedProfitAud: number | null  // AUD gained if the target is hit
+  riskPercent: number | null
+  riskAmount: number | null
 }
 
 export interface StatusResponse {
@@ -59,6 +67,18 @@ export interface RiskSettingsResponse {
 
 // ── Trades ────────────────────────────────────────────────────────────────────
 
+export interface TradeSizing {
+  riskPercent: number
+  riskSource: string       // 'signal-override' | 'db' | 'config-default'
+  accountBalance: number   // AUD at sizing time
+  riskAmount: number       // AUD at risk = balance × risk%
+  atr: number
+  stopDistance: number
+  stopSource: string       // 'signal-sl' | 'atr×N'
+  quoteToAud: number
+  capReason: string | null // null | 'margin-cap' | 'max-position-units' | 'aborted'
+}
+
 export interface TradeRecord {
   instrument: string
   direction: 'Long' | 'Short'
@@ -68,13 +88,22 @@ export interface TradeRecord {
   openedAt: string
   closedAt: string | null
   durationSeconds: number | null
+  stopLoss: number | null
+  takeProfit: number | null
+  projectedLossAud: number | null
+  projectedProfitAud: number | null
+  sizing: TradeSizing | null  // null for trades placed before migration 007
 }
 
+export type TradesRange = 'week' | 'month' | 'quarter' | 'all'
+
 export interface DailyPnlRecord {
-  date: string        // "YYYY-MM-DD" (daily = that day, weekly = Monday of the week)
+  date: string        // "YYYY-MM-DD" — the UTC day the trade was closed (P&L realized)
   pnl: number
   tradeCount: number
 }
+
+export type PnlRange = 'week' | 'month'
 
 export interface OandaTradeRecord {
   id: string
@@ -85,6 +114,48 @@ export interface OandaTradeRecord {
   realizedPL: number   // in account currency (AUD), net of commission & financing
   openedAt: string     // ISO timestamp — when the position was opened
   closedAt: string     // ISO timestamp — when the position was closed
+}
+
+// ── System / deploy verification ──────────────────────────────────────────────
+
+export interface VersionResponse {
+  service: string
+  sha: string
+  startedAt: string
+  uptimeSeconds: number
+  accountEnvironment: string | null
+  accountLabel: string | null
+  isLive: boolean
+}
+
+export interface ReadinessResponse {
+  ok: boolean
+  api: { sha: string; startedAt: string }
+  worker: { sha?: string; startedAt?: string; beatAgeSeconds?: number; healthy: boolean; error?: string }
+  postgres: { reachable: boolean; error: string | null; appliedMigration: number | null; expectedMigration: number | null; schemaCurrent: boolean }
+  redis: { reachable: boolean; error: string | null }
+  broker: { reachable: boolean; error: string | null; balanceAud: number; accountEnvironment: string | null; accountLabel: string | null; isLive: boolean }
+  riskSettings: { ok: boolean; note: string | null; instruments: { instrument: string; riskPercent: number; isActive: boolean; source: string }[] }
+}
+
+export interface DryRunResult {
+  dryRun: boolean
+  instrument: string
+  direction: string
+  stage: string
+  wouldTrade: boolean
+  outcome: string
+  workerSha: string
+  completedAt: string
+  detail?: {
+    units?: number
+    stopLoss?: number
+    takeProfit?: number
+    projectedLossAud?: number
+    projectedProfitAud?: number | null
+    balance?: number
+    sizing?: { riskPercent: number; riskSource: string; riskAmount: number }
+  } | null
 }
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -159,9 +230,19 @@ export const api = {
 
   getFilterStatus: () => request<FilterStatusResponse>('/status/filters'),
 
-  getTrades: () => request<TradeRecord[]>('/status/trades'),
+  getTrades: (opts?: { range?: TradesRange; from?: string; to?: string }) => {
+    const q = new URLSearchParams()
+    if (opts?.from || opts?.to) {
+      if (opts.from) q.set('from', opts.from)
+      if (opts.to) q.set('to', opts.to)
+    } else if (opts?.range) {
+      q.set('range', opts.range)
+    }
+    const qs = q.toString()
+    return request<TradeRecord[]>(`/status/trades${qs ? `?${qs}` : ''}`)
+  },
 
-  getPnl: (range: 'daily' | 'weekly') =>
+  getPnl: (range: PnlRange) =>
     request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
 
   getOandaTrades: (days = 30) =>
@@ -187,6 +268,26 @@ export const api = {
   pauseAll: () => request<void>('/risk/pause-all', { method: 'POST' }),
 
   resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
+
+  getVersion: () => request<VersionResponse>('/status/version'),
+
+  getReadiness: () => request<ReadinessResponse>('/status/readiness'),
+
+  getMidPrice: (instrument: string) =>
+    request<{ instrument: string; mid: number }>(`/price/mid/${instrument}`),
+
+  // Sends a dry-run signal through the real pipeline (queue → worker → filters →
+  // sizing). The worker never places an order for dryRun signals.
+  sendDryRunSignal: (secret: string, instrument: string, price: number, atr: number, key: string) =>
+    request<void>(`/signal?secret=${encodeURIComponent(secret)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        instrument, direction: 'Long', price, atr,
+        riskPercent: 0, idempotencyKey: key, dryRun: true,
+      }),
+    }),
+
+  getDryRunResult: (key: string) => request<DryRunResult>(`/status/dryrun/${key}`),
 
   getActiveAccount: () => request<ActiveAccountResponse>('/accounts/active'),
 

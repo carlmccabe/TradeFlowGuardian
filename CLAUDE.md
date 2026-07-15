@@ -87,7 +87,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 - [x] Global pause toggle (header, POST /api/status/pause)
 - [x] Mobile-first layout (max-w-2xl, single column)
 - [x] PWA manifest + meta tags
-- [ ] P&L chart (daily, weekly)
+- [x] P&L view — current week / month, realized P&L scoped to the period (diverging bar chart + headline summary)
 - [ ] SignalR for real-time push (Phase 3 final)
 
 ### Phase 4 — Infrastructure
@@ -118,6 +118,7 @@ fxpractice (dev) / fxtrade     Npgsql + Dapper, written after every order
 }
 ```
 Direction values: `"Long"` | `"Short"` | `"Close"`
+Optional: `"dryRun": true` — full pipeline (filters, DB risk lookup, live sizing) with no order placed; result stored 15 min at `GET /api/status/dryrun/{idempotencyKey}`. Used by `scripts/verify-deploy.sh` and the dashboard System panel to verify deploys end-to-end.
 
 ## Risk Parameters (current live settings)
 | Pair | Risk % | ATR Stop | ATR Target | Magic (legacy MT4) |

@@ -15,7 +15,8 @@ public interface ISignalFilter
 
 public interface IPositionSizer
 {
-    Task<long> CalculateUnitsAsync(TradeSignal signal, decimal accountBalance, CancellationToken ct = default);
+    /// <summary>Computes units for a signal, returning the full sizing audit trail (see <see cref="SizingBreakdown"/>).</summary>
+    Task<SizingBreakdown> CalculateUnitsAsync(TradeSignal signal, decimal accountBalance, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -79,14 +80,23 @@ public interface ITradeHistoryRepository
 {
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
     Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(int days = 90, CancellationToken ct = default);
+    /// <summary>Highest applied migration version from schema_versions, or null when unreachable.</summary>
+    Task<int?> GetSchemaVersionAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Returns entry+close trade pairs whose entry executed inside [from, to).
+    /// Null <paramref name="from"/> means no lower bound (all time); null <paramref name="to"/> means up to now.
+    /// Rows include the persisted sizing breakdown columns (null for pre-transparency trades).
+    /// </summary>
+    Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns realized P&amp;L grouped by UTC day (weekly=false, 30 days) or ISO week (weekly=true, 90 days).
+    /// Returns realized P&amp;L grouped by UTC day for the current week or month
+    /// (see <see cref="PnlRange"/>). Buckets by the trade's <em>close</em> date, so a
+    /// trade entered last period but closed this period counts toward this period.
     /// Only includes closed trades (entry paired with a subsequent Close fill).
     /// Never throws — returns empty list on DB error.
     /// </summary>
-    Task<IReadOnlyList<DailyPnlRecord>> GetDailyPnlAsync(bool weekly = false, CancellationToken ct = default);
+    Task<IReadOnlyList<DailyPnlRecord>> GetDailyPnlAsync(PnlRange range, CancellationToken ct = default);
 }
 
 /// <summary>

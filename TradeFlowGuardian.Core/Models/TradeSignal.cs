@@ -33,4 +33,12 @@ public class TradeSignal
 
     /// <summary>Idempotency key — TV alert ID or unique hash to prevent duplicate execution. Optional.</summary>
     public string? IdempotencyKey { get; init; }
+
+    /// <summary>
+    /// When true, the Worker runs the full pipeline — filters, DB risk lookup, live
+    /// balance, sizing, SL/TP — but never places an order or writes trade history.
+    /// The outcome report is stored under tradeflow:dryrun:{IdempotencyKey} for 15 min.
+    /// Used to verify a deployment end-to-end without risking money.
+    /// </summary>
+    public bool DryRun { get; init; }
 }
