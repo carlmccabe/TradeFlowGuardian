@@ -6,6 +6,7 @@ using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Core.Models;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
@@ -81,15 +82,19 @@ public class StatusController(
     }
 
     /// <summary>
-    /// Realized P&amp;L grouped by UTC day (range=daily, 30 days) or ISO week (range=weekly, 13 weeks).
-    /// Each bucket includes only fully-closed trades (entry fill paired with a Close fill).
-    /// Returns an empty array when there is no matching trade history — never an error.
+    /// Realized P&amp;L per UTC day for the current week (range=week, Monday→now) or the
+    /// current month (range=month, 1st→now). Buckets by the trade's close date, so each
+    /// bucket reflects P&amp;L actually realized that day. Only fully-closed trades count
+    /// (entry fill paired with a Close fill). Returns an empty array when there is no
+    /// matching trade history — never an error.
     /// </summary>
     [HttpGet("pnl")]
-    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "daily", CancellationToken ct = default)
+    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "week", CancellationToken ct = default)
     {
-        var weekly = "weekly".Equals(range, StringComparison.OrdinalIgnoreCase);
-        var data   = await tradeHistory.GetDailyPnlAsync(weekly, ct);
+        var pnlRange = "month".Equals(range, StringComparison.OrdinalIgnoreCase)
+            ? PnlRange.Month
+            : PnlRange.Week;
+        var data = await tradeHistory.GetDailyPnlAsync(pnlRange, ct);
         return Ok(data.Select(d => new
         {
             date       = d.Date,

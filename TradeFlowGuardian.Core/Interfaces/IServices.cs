@@ -82,11 +82,13 @@ public interface ITradeHistoryRepository
     Task<IReadOnlyList<PairedTradeRecord>> GetPairedTradesAsync(int days = 90, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns realized P&amp;L grouped by UTC day (weekly=false, 30 days) or ISO week (weekly=true, 90 days).
+    /// Returns realized P&amp;L grouped by UTC day for the current week or month
+    /// (see <see cref="PnlRange"/>). Buckets by the trade's <em>close</em> date, so a
+    /// trade entered last period but closed this period counts toward this period.
     /// Only includes closed trades (entry paired with a subsequent Close fill).
     /// Never throws — returns empty list on DB error.
     /// </summary>
-    Task<IReadOnlyList<DailyPnlRecord>> GetDailyPnlAsync(bool weekly = false, CancellationToken ct = default);
+    Task<IReadOnlyList<DailyPnlRecord>> GetDailyPnlAsync(PnlRange range, CancellationToken ct = default);
 }
 
 /// <summary>
