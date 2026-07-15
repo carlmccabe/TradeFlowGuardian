@@ -1,15 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
-import { api, type PnlRange, type TradeRecord } from '../api/client'
+import { api, type PnlRange, type OandaTradeRecord } from '../api/client'
 import { usePolling } from '../hooks/usePolling'
 import { PnlChart, type ChartBar } from './PnlChart'
-import { TradeList } from './TradeList'
 
-function computePnlQuote(t: TradeRecord): number | null {
-  if (t.exitPrice === null) return null
-  const raw = t.direction === 'Long'
-    ? (t.exitPrice - t.entryPrice) * t.units
-    : (t.entryPrice - t.exitPrice) * Math.abs(t.units)
-  return Math.round(raw * 100) / 100
+function formatDuration(openedAt: string, closedAt: string): string {
+  const secs = Math.round((new Date(closedAt).getTime() - new Date(openedAt).getTime()) / 1000)
+  if (secs < 60)   return `${secs}s`
+  if (secs < 3600) return `${Math.round(secs / 60)}m`
+  if (secs < 86400) return `${(secs / 3600).toFixed(1)}h`
+  return `${Math.round(secs / 86400)}d`
 }
 
 function isoDay(d: Date): string {
@@ -24,7 +23,7 @@ interface PeriodWindow {
 }
 
 // Builds the day frame for the current week (Mon–Sun) or month (1st–end), in UTC,
-// matching the window the API buckets by close date.
+// matching the window trades are bucketed into by close date.
 function buildWindow(range: PnlRange): PeriodWindow {
   const now = new Date()
   const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
@@ -72,63 +71,63 @@ function buildWindow(range: PnlRange): PeriodWindow {
 export function PnlTab() {
   const [range, setRange] = useState<PnlRange>('week')
 
-  const pnlFetcher   = useCallback(() => api.getPnl(range), [range])
-  const tradeFetcher = useCallback(() => api.getTrades(), [])
-
-  const { data: pnlData, error: pnlError, loading: pnlLoading } = usePolling(pnlFetcher, 60_000)
-  const { data: trades }                                        = usePolling(tradeFetcher, 60_000)
+  // 45 days always covers the current calendar month; trades are scoped client-side below.
+  const fetcher = useCallback(() => api.getOandaTrades(45), [])
+  const { data: trades, error, loading } = usePolling(fetcher, 60_000)
 
   const window = useMemo(() => buildWindow(range), [range])
 
-  // Closed trades realized within the current period (by close date).
-  const periodTrades = useMemo(() => {
+  // OANDA closed trades realized within the current period (by close date). All P&L in AUD.
+  const periodTrades = useMemo<OandaTradeRecord[]>(() => {
     if (!trades) return []
     const startMs = window.start.getTime()
-    return trades
-      .filter(t => t.exitPrice !== null && t.closedAt !== null && new Date(t.closedAt).getTime() >= startMs)
-      .map(t => ({ ...t, pnlQuote: computePnlQuote(t) }))
+    return trades.filter(t => new Date(t.closedAt).getTime() >= startMs)
   }, [trades, window])
 
-  // Chart bars: merge the API's daily buckets onto the full period frame, zero-filling gaps.
+  // Chart bars: bucket period trades by UTC close day onto the full period frame, zero-filling gaps.
   const bars = useMemo<ChartBar[]>(() => {
-    const byDate = new Map((pnlData ?? []).map(d => [d.date, d]))
+    const byDate = new Map<string, { pnl: number; count: number }>()
+    for (const t of periodTrades) {
+      const key = isoDay(new Date(t.closedAt))
+      const prev = byDate.get(key) ?? { pnl: 0, count: 0 }
+      byDate.set(key, { pnl: prev.pnl + t.realizedPL, count: prev.count + 1 })
+    }
     return window.days.map(day => {
       const rec = byDate.get(day.date)
       return {
         date: day.date,
-        pnl: rec?.pnl ?? 0,
-        tradeCount: rec?.tradeCount ?? 0,
+        pnl: Math.round((rec?.pnl ?? 0) * 100) / 100,
+        tradeCount: rec?.count ?? 0,
         future: day.future,
         isToday: day.isToday,
         label: day.label,
       }
     })
-  }, [pnlData, window])
+  }, [periodTrades, window])
 
-  // Headline figures — total/best come from the chart buckets so they reconcile with the bars.
-  const total     = useMemo(() => (pnlData ?? []).reduce((s, d) => s + d.pnl, 0), [pnlData])
-  const tradeCount = useMemo(() => (pnlData ?? []).reduce((s, d) => s + d.tradeCount, 0), [pnlData])
-  const bestDay   = useMemo(() => {
-    const traded = (pnlData ?? []).filter(d => d.tradeCount > 0)
+  // Headline figures — all derived from the same period trades so they reconcile with the bars.
+  const total      = useMemo(() => periodTrades.reduce((s, t) => s + t.realizedPL, 0), [periodTrades])
+  const tradeCount = periodTrades.length
+  const bestDay    = useMemo(() => {
+    const traded = bars.filter(b => b.tradeCount > 0)
     if (traded.length === 0) return null
-    return traded.reduce((best, d) => (d.pnl > best.pnl ? d : best))
-  }, [pnlData])
+    return traded.reduce((best, b) => (b.pnl > best.pnl ? b : best))
+  }, [bars])
   const winRate = useMemo(() => {
-    const closed = periodTrades.filter(t => t.pnlQuote !== null)
-    if (closed.length === 0) return null
-    return Math.round((closed.filter(t => (t.pnlQuote ?? 0) > 0).length / closed.length) * 100)
+    if (periodTrades.length === 0) return null
+    return Math.round((periodTrades.filter(t => t.realizedPL > 0).length / periodTrades.length) * 100)
   }, [periodTrades])
 
   // Per-pair breakdown, scoped to the period.
   const breakdown = useMemo(() => {
     const map: Record<string, { count: number; pnl: number; wins: number }> = {}
-    periodTrades.forEach(t => {
-      if (t.pnlQuote === null) return
-      if (!map[t.instrument]) map[t.instrument] = { count: 0, pnl: 0, wins: 0 }
-      map[t.instrument].count++
-      map[t.instrument].pnl += t.pnlQuote
-      if (t.pnlQuote > 0) map[t.instrument].wins++
-    })
+    for (const t of periodTrades) {
+      const key = t.instrument ?? 'OTHER'
+      if (!map[key]) map[key] = { count: 0, pnl: 0, wins: 0 }
+      map[key].count++
+      map[key].pnl += t.realizedPL
+      if (t.realizedPL > 0) map[key].wins++
+    }
     return Object.entries(map).map(([instrument, v]) => ({
       instrument,
       tradeCount: v.count,
@@ -165,9 +164,9 @@ export function PnlTab() {
         {/* Big total */}
         <div className="flex items-baseline gap-2">
           <span className={`text-3xl font-mono font-bold ${total >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {pnlData ? `${total >= 0 ? '+' : ''}${total.toFixed(2)}` : '—'}
+            {trades ? `${total >= 0 ? '+' : ''}${total.toFixed(2)}` : '—'}
           </span>
-          <span className="text-xs text-gray-500">realized P&amp;L (quote)</span>
+          <span className="text-xs text-gray-500">realized P&amp;L (AUD)</span>
         </div>
 
         {/* Sub-stats */}
@@ -183,16 +182,16 @@ export function PnlTab() {
           )}
         </div>
 
-        {pnlLoading && !pnlData && <p className="text-sm text-gray-500 animate-pulse">Loading…</p>}
-        {pnlError                && <p className="text-sm text-red-400">{pnlError}</p>}
-        {pnlData                 && <PnlChart bars={bars} />}
+        {loading && !trades && <p className="text-sm text-gray-500 animate-pulse">Loading…</p>}
+        {error              && <p className="text-sm text-red-400">{error}</p>}
+        {trades             && <PnlChart bars={bars} />}
 
-        {pnlData && tradeCount === 0 && (
+        {trades && tradeCount === 0 && (
           <p className="text-xs text-gray-600 italic mt-3">No trades closed {range === 'week' ? 'this week' : 'this month'} yet.</p>
         )}
       </div>
 
-      {/* Per-pair breakdown */}
+      {/* Per-instrument breakdown */}
       {breakdown.length > 0 && (
         <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
           <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-3">
@@ -215,13 +214,56 @@ export function PnlTab() {
         </div>
       )}
 
-      {/* Trade list */}
+      {/* Closed trade list */}
       <div className="rounded-xl bg-gray-900 border border-gray-800 p-5">
-        <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-3">
+        <p className="text-xs font-medium uppercase tracking-widest text-gray-500 mb-1">
           Trades closed {range === 'week' ? 'this week' : 'this month'}
         </p>
-        <p className="text-xs text-gray-600 mb-3">P&amp;L shown in quote currency (approximate)</p>
-        <TradeList trades={periodTrades} />
+        <p className="text-xs text-gray-600 mb-3">P&amp;L in AUD from OANDA</p>
+        {trades && periodTrades.length === 0 && (
+          <p className="text-sm text-gray-500 italic">No closed trades in the selected period.</p>
+        )}
+        <div className="flex flex-col gap-2">
+          {periodTrades.map(t => {
+            const isLong = t.units > 0
+            const pnlColor = t.realizedPL >= 0 ? 'text-emerald-400' : 'text-red-400'
+            return (
+              <div key={t.id} className="rounded-lg bg-gray-800 px-4 py-3 flex items-center justify-between gap-3 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
+                    isLong ? 'bg-emerald-900 text-emerald-300' : 'bg-red-900 text-red-300'
+                  }`}>
+                    {isLong ? 'LONG' : 'SHORT'}
+                  </span>
+                  <span className="font-mono text-gray-100 truncate">
+                    {(t.instrument ?? 'UNKNOWN').replace('_', '/')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-right flex-shrink-0">
+                  <div className="hidden sm:block">
+                    <p className="text-xs text-gray-500">Entry → Close</p>
+                    <p className="font-mono text-gray-300 text-xs">
+                      {t.entryPrice.toFixed(t.entryPrice > 10 ? 3 : 5)}
+                      {t.closePrice > 0 && ` → ${t.closePrice.toFixed(t.closePrice > 10 ? 3 : 5)}`}
+                    </p>
+                  </div>
+                  <div className="hidden sm:block">
+                    <p className="text-xs text-gray-500">Duration</p>
+                    <p className="font-mono text-gray-300 text-xs">
+                      {formatDuration(t.openedAt, t.closedAt)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">P&amp;L (AUD)</p>
+                    <p className={`font-mono font-semibold ${pnlColor}`}>
+                      {t.realizedPL >= 0 ? '+' : ''}{t.realizedPL.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
