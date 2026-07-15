@@ -13,6 +13,19 @@
 
 ---
 
+### 2026-07-15
+- **Optimistic risk stepper** (`claude/risk-size-adjustment-perf-kj46lk`) — dashboard risk ± taps no longer block on the network
+  - Previously each tap issued its own PATCH and disabled both buttons until the round trip finished (2.5% → 1.0% = 15 serial requests)
+  - Now taps update the displayed value instantly; one debounced PATCH (500ms after the last tap) commits the final value
+  - Value shows amber while unconfirmed, emerald once the server acks; commit sequence counter discards stale responses; on error it reverts to the last server value (10s poll reconciles)
+  - Debounced value is flushed on unmount so switching tabs mid-adjustment doesn't drop it
+  - Dashboard build clean; pre-existing lint error in useSignalR.ts untouched
+
+### Next session goals
+- GitHub Actions CI/CD pipeline
+- Cloudflare DNS + SSL
+- P&L chart polish / SignalR real-time push completion
+
 ### 2026-04-10
 - Scaffolded solution, all 4 projects
 - Migrated to .NET 10

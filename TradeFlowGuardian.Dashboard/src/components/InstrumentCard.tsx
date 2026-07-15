@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type RiskSettingsResponse, type PositionResponse } from '../api/client'
 
 const RISK_MIN = 0.5
 const RISK_MAX = 3.0
 const RISK_STEP = 0.1
+// Taps apply locally right away; the PATCH fires once, this long after the last tap.
+const RISK_COMMIT_DELAY_MS = 500
 
 interface Props {
   settings: RiskSettingsResponse
@@ -14,6 +16,13 @@ interface Props {
 export function InstrumentCard({ settings, position, onUpdated }: Props) {
   const [busy, setBusy] = useState(false)
   const { instrument, riskPercent, isActive } = settings
+
+  // Risk value shown before the server has confirmed it; null = in sync with settings.
+  const [pendingRisk, setPendingRisk] = useState<number | null>(null)
+  const commitTimer = useRef<number | undefined>(undefined)
+  const commitSeq = useRef(0)
+  const unflushed = useRef<number | null>(null)
+  const displayRisk = pendingRisk ?? riskPercent
 
   const side = position
     ? position.units > 0 ? 'LONG' : 'SHORT'
@@ -26,17 +35,35 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
 
   const plColor = position && position.unrealizedPL >= 0 ? 'text-emerald-400' : 'text-red-400'
 
-  async function adjustRisk(delta: number) {
-    const next = Math.round((riskPercent + delta) * 10) / 10
+  function adjustRisk(delta: number) {
+    const next = Math.round((displayRisk + delta) * 10) / 10
     if (next < RISK_MIN || next > RISK_MAX) return
-    setBusy(true)
+    setPendingRisk(next)
+    unflushed.current = next
+    window.clearTimeout(commitTimer.current)
+    commitTimer.current = window.setTimeout(() => void commitRisk(next), RISK_COMMIT_DELAY_MS)
+  }
+
+  async function commitRisk(value: number) {
+    const seq = ++commitSeq.current
+    unflushed.current = null
     try {
-      const updated = await api.updateRisk(instrument, next)
-      onUpdated(updated)
+      const updated = await api.updateRisk(instrument, value)
+      if (seq === commitSeq.current) onUpdated(updated)
+    } catch {
+      // Revert to the last server-confirmed value; the 10s poll reconciles anyway.
     } finally {
-      setBusy(false)
+      if (seq === commitSeq.current) {
+        setPendingRisk(current => (current === value ? null : current))
+      }
     }
   }
+
+  // Tab switches unmount the card mid-debounce; don't lose the last taps.
+  useEffect(() => () => {
+    window.clearTimeout(commitTimer.current)
+    if (unflushed.current !== null) void api.updateRisk(instrument, unflushed.current)
+  }, [instrument])
 
   async function toggleActive() {
     setBusy(true)
@@ -103,17 +130,19 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => adjustRisk(-RISK_STEP)}
-            disabled={busy || riskPercent <= RISK_MIN}
+            disabled={displayRisk <= RISK_MIN}
             className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm disabled:opacity-30 transition-colors"
           >
             −
           </button>
-          <span className="font-mono text-emerald-400 font-semibold w-10 text-center">
-            {riskPercent.toFixed(1)}%
+          <span className={`font-mono font-semibold w-10 text-center ${
+            pendingRisk !== null ? 'text-amber-400' : 'text-emerald-400'
+          }`}>
+            {displayRisk.toFixed(1)}%
           </span>
           <button
             onClick={() => adjustRisk(+RISK_STEP)}
-            disabled={busy || riskPercent >= RISK_MAX}
+            disabled={displayRisk >= RISK_MAX}
             className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm disabled:opacity-30 transition-colors"
           >
             +
