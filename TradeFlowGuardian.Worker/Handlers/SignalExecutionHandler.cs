@@ -34,6 +34,52 @@ public class SignalExecutionHandler(
     private readonly RiskConfig _risk = risk.Value;
     private readonly IDatabase _db = redis.GetDatabase();
     private const string EventsChannel = "tradeflow:events";
+    private static readonly TimeSpan DryRunResultTtl = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Stores the outcome of a dry-run signal under tradeflow:dryrun:{key} and publishes
+    /// a dry_run_completed event. Stage names the pipeline step that decided the outcome.
+    /// </summary>
+    private async Task ReportDryRunAsync(
+        TradeSignal signal, string stage, bool wouldTrade, string outcome, object? detail = null)
+    {
+        if (signal.IdempotencyKey is null)
+        {
+            logger.LogWarning("Dry run for {Instrument} has no idempotencyKey — result not retrievable", signal.Instrument);
+            return;
+        }
+        try
+        {
+            var payload = JsonSerializer.Serialize(new
+            {
+                dryRun      = true,
+                instrument  = signal.Instrument,
+                direction   = signal.Direction.ToString(),
+                stage,
+                wouldTrade,
+                outcome,
+                detail,
+                workerSha   = Services.BuildInfo.GitSha,
+                completedAt = DateTimeOffset.UtcNow
+            });
+            await _db.StringSetAsync($"tradeflow:dryrun:{signal.IdempotencyKey}", payload, DryRunResultTtl);
+            await PublishEventAsync(new
+            {
+                type = "dry_run_completed",
+                instrument = signal.Instrument,
+                key = signal.IdempotencyKey,
+                stage,
+                wouldTrade,
+                outcome
+            });
+            logger.LogInformation("DRY RUN result for {Instrument}: stage={Stage} wouldTrade={WouldTrade} — {Outcome}",
+                signal.Instrument, stage, wouldTrade, outcome);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to store dry-run result for {Key}", signal.IdempotencyKey);
+        }
+    }
 
     public async Task HandleAsync(TradeSignal signal, CancellationToken ct)
     {
@@ -69,8 +115,11 @@ public class SignalExecutionHandler(
             signal.Direction, signal.Instrument, signal.Price, signal.Atr,
             signal.StopLoss, signal.TakeProfit, signal.RiskPercent, signal.IdempotencyKey);
 
-        // ── Idempotency check ─────────────────────────────────────────────────
-        if (signal.IdempotencyKey is not null)
+        if (signal.DryRun)
+            logger.LogWarning("DRY RUN signal for {Instrument} — no order will be placed, no history written", signal.Instrument);
+
+        // ── Idempotency check (skipped for dry runs so tests are repeatable) ──
+        if (signal.IdempotencyKey is not null && !signal.DryRun)
         {
             var key = $"idempotency:signal:{signal.IdempotencyKey}";
             // Set with 24h TTL if it doesn't exist
@@ -97,6 +146,17 @@ public class SignalExecutionHandler(
         // ── Handle Close signal ───────────────────────────────────────────────
         if (signal.Direction == SignalDirection.Close)
         {
+            if (signal.DryRun)
+            {
+                var openUnits = await broker.GetOpenPositionUnitsAsync(signal.Instrument, ct);
+                await ReportDryRunAsync(signal, "close", openUnits is not null,
+                    openUnits is not null
+                        ? $"Would close open position of {openUnits} units"
+                        : "No open position to close",
+                    new { openUnits });
+                return;
+            }
+
             // CancellationToken.None — must not abort a close request once sent.
             var closeResult = await broker.ClosePositionAsync(signal.Instrument, CancellationToken.None);
             await tradeHistory.InsertAsync(new TradeHistoryRecord
@@ -140,6 +200,12 @@ public class SignalExecutionHandler(
         {
             logger.LogWarning("Signal for {Instrument} BLOCKED by filter [{Label}]: {Reason}",
                 signal.Instrument, filterResult.Label, filterResult.Reason);
+            if (signal.DryRun)
+            {
+                await ReportDryRunAsync(signal, "filters", false,
+                    $"Blocked by filter [{filterResult.Label}]: {filterResult.Reason}");
+                return;
+            }
             TradeMetrics.SignalsFiltered.WithLabels(filterResult.Label).Inc();
             return;
         }
@@ -157,6 +223,11 @@ public class SignalExecutionHandler(
         else if (!riskSettings.IsActive)
         {
             logger.LogWarning("Signal for {Instrument} BLOCKED: instrument is inactive in risk settings", signal.Instrument);
+            if (signal.DryRun)
+            {
+                await ReportDryRunAsync(signal, "risk-settings", false, "Instrument is inactive in risk settings");
+                return;
+            }
             TradeMetrics.SignalsFiltered.WithLabels("instrument_inactive").Inc();
             return;
         }
@@ -186,6 +257,9 @@ public class SignalExecutionHandler(
             logger.LogWarning(
                 "Signal SKIPPED: Position already open on {Instrument} ({Units} units). No pyramiding.",
                 signal.Instrument, existingUnits);
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "no-pyramiding", false,
+                    $"Position already open ({existingUnits} units) — entry would be skipped");
             return;
         }
         logger.LogInformation("No open position on {Instrument} — proceeding to size order", signal.Instrument);
@@ -196,6 +270,9 @@ public class SignalExecutionHandler(
         {
             logger.LogError("Aborting signal for {Instrument}: Could not fetch account balance or balance is non-positive ({Balance:C})",
                 signal.Instrument, balance);
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "balance", false,
+                    $"Could not fetch account balance (got {balance}) — check broker credentials");
             return;
         }
         logger.LogInformation("Account balance: {Balance:C} AUD", balance);
@@ -204,22 +281,34 @@ public class SignalExecutionHandler(
 
         // ── Daily drawdown circuit breaker ────────────────────────────────────────
         // EnsureDayOpenNav is a SetNX — only fires once per UTC day.
+        // Dry runs read the breach state without marking it (no side effects).
         await drawdownGuard.EnsureDayOpenNavAsync(balance, ct);
-        if (await drawdownGuard.CheckAndMarkIfBreachedAsync(balance, ct))
+        var breached = signal.DryRun
+            ? await drawdownGuard.IsBreachedAsync(ct)
+            : await drawdownGuard.CheckAndMarkIfBreachedAsync(balance, ct);
+        if (breached)
         {
             logger.LogWarning(
                 "Aborting signal for {Instrument}: daily drawdown limit breached (confirmed at balance fetch).",
                 signal.Instrument);
+            if (signal.DryRun)
+            {
+                await ReportDryRunAsync(signal, "drawdown", false, "Daily drawdown circuit breaker is tripped");
+                return;
+            }
             TradeMetrics.SignalsFiltered.WithLabels("daily_drawdown").Inc();
             await PublishEventAsync(new { type = "drawdown_breached", balance });
             return;
         }
 
-        var units = await sizer.CalculateUnitsAsync(signal, balance, ct);
+        var sizing = await sizer.CalculateUnitsAsync(signal, balance, ct);
+        var units  = sizing.Units;
         if (units <= 0)
         {
             logger.LogError("Aborting signal for {Instrument}: Position size calculated as {Units} units. Check ATR ({Atr}) and risk configuration (Risk%: {RiskPercent}%, Balance: {Balance:C})",
                 signal.Instrument, units, signal.Atr, signal.RiskPercent > 0 ? signal.RiskPercent : _risk.DefaultRiskPercent, balance);
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "sizing", false, "Position size calculated as 0 units", sizing);
             return;
         }
 
@@ -250,6 +339,9 @@ public class SignalExecutionHandler(
                     "Aborting signal for {Instrument}: ATR-based SL/TP requires Price and ATR " +
                     "(Price={Price}, Atr={Atr}). Send pre-calculated StopLoss/TakeProfit or include both.",
                     signal.Instrument, signal.Price, signal.Atr);
+                if (signal.DryRun)
+                    await ReportDryRunAsync(signal, "sl-tp", false,
+                        $"ATR-based SL/TP requires Price and ATR (Price={signal.Price}, Atr={signal.Atr})");
                 return;
             }
 
@@ -277,6 +369,9 @@ public class SignalExecutionHandler(
         {
             logger.LogError("Aborting signal for {Instrument}: Invalid SL/TP (SL={SL}, TP={TP}). Check ATR ({Atr}) and signal values.",
                 signal.Instrument, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt), signal.Atr);
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "sl-tp", false,
+                    $"Invalid SL/TP (SL={stopLoss.ToString(priceFmt)}, TP={takeProfit.ToString(priceFmt)})");
             return;
         }
 
@@ -284,6 +379,9 @@ public class SignalExecutionHandler(
         {
             logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not above SL ({SL}) for LONG",
                 signal.Instrument, takeProfit.ToString(priceFmt), stopLoss.ToString(priceFmt));
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "sl-tp", false,
+                    $"TP ({takeProfit.ToString(priceFmt)}) is not above SL ({stopLoss.ToString(priceFmt)}) for LONG");
             return;
         }
 
@@ -291,12 +389,38 @@ public class SignalExecutionHandler(
         {
             logger.LogError("Aborting signal for {Instrument}: TP ({TP}) is not below SL ({SL}) for SHORT",
                 signal.Instrument, takeProfit.ToString(priceFmt), stopLoss.ToString(priceFmt));
+            if (signal.DryRun)
+                await ReportDryRunAsync(signal, "sl-tp", false,
+                    $"TP ({takeProfit.ToString(priceFmt)}) is not below SL ({stopLoss.ToString(priceFmt)}) for SHORT");
             return;
         }
 
         logger.LogInformation(
             "Executing {Direction} order for {Instrument} | Units={Units} | AccountBalance={Balance:C} | SL={SL} | TP={TP}",
             signal.Direction, signal.Instrument, units, balance, stopLoss.ToString(priceFmt), takeProfit.ToString(priceFmt));
+
+        // ── Dry run stops here: everything checked, nothing submitted ─────────
+        if (signal.DryRun)
+        {
+            var entryRef  = signal.Price > 0 ? signal.Price : (decimal?)null;
+            var projLoss  = Math.Round(sizing.LossPerUnit * units, 2);
+            var projProfit = entryRef is not null
+                ? Math.Round(Math.Abs(takeProfit - entryRef.Value) * units * sizing.QuoteToAud, 2)
+                : (decimal?)null;
+            await ReportDryRunAsync(signal, "ready-to-order", true,
+                $"Would place {signal.Direction} {units} units, SL {stopLoss.ToString(priceFmt)} / TP {takeProfit.ToString(priceFmt)}",
+                new
+                {
+                    units,
+                    stopLoss,
+                    takeProfit,
+                    projectedLossAud   = projLoss,
+                    projectedProfitAud = projProfit,
+                    balance,
+                    sizing
+                });
+            return;
+        }
 
         // ── Place order ───────────────────────────────────────────────────────
         // CancellationToken.None for both calls: once we decide to trade, we must
@@ -322,7 +446,17 @@ public class SignalExecutionHandler(
             OrderId      = result.OrderId,
             Success      = result.Success,
             ErrorMessage = result.Success ? null : result.Message,
-            ExecutedAt   = result.ExecutedAt
+            ExecutedAt   = result.ExecutedAt,
+            // Sizing audit trail — how these units were reached (migration 007)
+            RiskPercent    = sizing.RiskPercent,
+            RiskSource     = sizing.RiskSource,
+            AccountBalance = sizing.AccountBalance,
+            RiskAmount     = sizing.RiskAmount,
+            Atr            = sizing.Atr,
+            StopDistance   = sizing.StopDistance,
+            StopSource     = sizing.StopSource,
+            QuoteToAud     = sizing.QuoteToAud,
+            CapReason      = sizing.CapReason
         }, CancellationToken.None);
 
         if (result.Success)

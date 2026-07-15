@@ -26,7 +26,7 @@ public class PositionSizer : IPositionSizer
         _logger   = logger;
     }
 
-    public async Task<long> CalculateUnitsAsync(
+    public async Task<SizingBreakdown> CalculateUnitsAsync(
         TradeSignal signal,
         decimal accountBalance,
         CancellationToken ct = default)
@@ -65,12 +65,25 @@ public class PositionSizer : IPositionSizer
 
         var lossPerUnit = stopDistance * quoteToAud;
 
+        var breakdown = new SizingBreakdown
+        {
+            RiskPercent    = riskPct,
+            RiskSource     = riskSource,
+            AccountBalance = accountBalance,
+            RiskAmount     = riskAmount,
+            StopDistance   = stopDistance,
+            StopSource     = stopSource,
+            Atr            = signal.Atr,
+            QuoteToAud     = quoteToAud,
+            LossPerUnit    = lossPerUnit
+        };
+
         if (lossPerUnit <= 0)
         {
             _logger.LogError(
                 "Sizing aborted for {Instrument}: lossPerUnit={LossPerUnit} (stopDistance={StopDist}, quoteToAud={QuoteToAud})",
                 signal.Instrument, lossPerUnit, stopDistance, quoteToAud);
-            return 0;
+            return breakdown with { Units = 0, CapReason = "aborted" };
         }
 
         var raw = riskAmount / lossPerUnit;
@@ -87,16 +100,26 @@ public class PositionSizer : IPositionSizer
         var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
         var units  = (long)Math.Round(capped);
 
+        string? capReason = null;
+        if (capped < raw)
+            capReason = marginCap < _risk.MaxPositionUnits ? "margin-cap" : "max-position-units";
+
         _logger.LogInformation(
             "Sizing {Instrument} {Direction} | riskSource={RiskSource} riskPct={RiskPct}% riskAmount={RiskAmount:F2} AUD | " +
             "stopSource={StopSource} stopDist={StopDist} quoteToAud={QuoteToAud:F4} lossPerUnit={LossPerUnit:F6} | " +
-            "raw={Raw:F0} marginCap={MarginCap:F0} units={Units}",
+            "raw={Raw:F0} marginCap={MarginCap:F0} units={Units} capReason={CapReason}",
             signal.Instrument, signal.Direction,
             riskSource, riskPct, riskAmount,
             stopSource, stopDistance, quoteToAud, lossPerUnit,
-            raw, marginCap, units);
+            raw, marginCap, units, capReason ?? "none");
 
-        return units;
+        return breakdown with
+        {
+            Units          = units,
+            RawUnits       = raw,
+            MarginCapUnits = marginCap,
+            CapReason      = capReason
+        };
     }
 
     /// <summary>

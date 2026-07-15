@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { AccountsTab } from './components/AccountsTab'
 import { GuardTab } from './components/GuardTab'
 import { PnlTab } from './components/PnlTab'
+import { TradesTab } from './components/TradesTab'
 
-type Tab = 'guard' | 'pnl' | 'accounts'
+type Tab = 'guard' | 'trades' | 'pnl' | 'accounts'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('guard')
@@ -19,6 +20,7 @@ export default function App() {
         {/* Tab switcher */}
         <div className="flex bg-gray-900 rounded-lg p-1 gap-1">
           <TabButton active={tab === 'guard'} onClick={() => setTab('guard')}>Guard</TabButton>
+          <TabButton active={tab === 'trades'} onClick={() => setTab('trades')}>Trades</TabButton>
           <TabButton active={tab === 'pnl'}   onClick={() => setTab('pnl')}>P&amp;L</TabButton>
           <TabButton active={tab === 'accounts'} onClick={() => setTab('accounts')}>Acct</TabButton>
         </div>
@@ -26,7 +28,7 @@ export default function App() {
 
       {/* Main */}
       <main className="max-w-2xl mx-auto px-4 py-6">
-        {tab === 'guard' ? <GuardTab /> : tab === 'pnl' ? <PnlTab /> : <AccountsTab />}
+        {tab === 'guard' ? <GuardTab /> : tab === 'trades' ? <TradesTab /> : tab === 'pnl' ? <PnlTab /> : <AccountsTab />}
       </main>
     </div>
   )

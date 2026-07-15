@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type RiskSettingsResponse, type PositionResponse } from '../api/client'
 
 const RISK_MIN = 0.5
 const RISK_MAX = 3.0
 const RISK_STEP = 0.1
+// Taps apply locally right away; the PATCH fires once, this long after the last tap.
+const RISK_COMMIT_DELAY_MS = 500
 
 interface Props {
   settings: RiskSettingsResponse
@@ -14,6 +16,13 @@ interface Props {
 export function InstrumentCard({ settings, position, onUpdated }: Props) {
   const [busy, setBusy] = useState(false)
   const { instrument, riskPercent, isActive } = settings
+
+  // Risk value shown before the server has confirmed it; null = in sync with settings.
+  const [pendingRisk, setPendingRisk] = useState<number | null>(null)
+  const commitTimer = useRef<number | undefined>(undefined)
+  const commitSeq = useRef(0)
+  const unflushed = useRef<number | null>(null)
+  const displayRisk = pendingRisk ?? riskPercent
 
   const side = position
     ? position.units > 0 ? 'LONG' : 'SHORT'
@@ -26,17 +35,35 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
 
   const plColor = position && position.unrealizedPL >= 0 ? 'text-emerald-400' : 'text-red-400'
 
-  async function adjustRisk(delta: number) {
-    const next = Math.round((riskPercent + delta) * 10) / 10
+  function adjustRisk(delta: number) {
+    const next = Math.round((displayRisk + delta) * 10) / 10
     if (next < RISK_MIN || next > RISK_MAX) return
-    setBusy(true)
+    setPendingRisk(next)
+    unflushed.current = next
+    window.clearTimeout(commitTimer.current)
+    commitTimer.current = window.setTimeout(() => void commitRisk(next), RISK_COMMIT_DELAY_MS)
+  }
+
+  async function commitRisk(value: number) {
+    const seq = ++commitSeq.current
+    unflushed.current = null
     try {
-      const updated = await api.updateRisk(instrument, next)
-      onUpdated(updated)
+      const updated = await api.updateRisk(instrument, value)
+      if (seq === commitSeq.current) onUpdated(updated)
+    } catch {
+      // Revert to the last server-confirmed value; the 10s poll reconciles anyway.
     } finally {
-      setBusy(false)
+      if (seq === commitSeq.current) {
+        setPendingRisk(current => (current === value ? null : current))
+      }
     }
   }
+
+  // Tab switches unmount the card mid-debounce; don't lose the last taps.
+  useEffect(() => () => {
+    window.clearTimeout(commitTimer.current)
+    if (unflushed.current !== null) void api.updateRisk(instrument, unflushed.current)
+  }, [instrument])
 
   async function toggleActive() {
     setBusy(true)
@@ -77,21 +104,48 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
 
       {/* Position details */}
       {position ? (
-        <div className="grid grid-cols-3 gap-2 mb-3 text-sm">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Entry</p>
-            <p className="font-mono text-gray-200">{position.averagePrice.toFixed(position.averagePrice > 10 ? 3 : 5)}</p>
+        <div className="mb-3">
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Entry</p>
+              <p className="font-mono text-gray-200">{position.averagePrice.toFixed(position.averagePrice > 10 ? 3 : 5)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Units</p>
+              <p className="font-mono text-gray-200">{Math.abs(position.units).toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Unreal. P&amp;L</p>
+              <p className={`font-mono font-semibold ${plColor}`}>
+                {position.unrealizedPL >= 0 ? '+' : ''}{position.unrealizedPL.toFixed(2)}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Units</p>
-            <p className="font-mono text-gray-200">{Math.abs(position.units).toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Unreal. P&amp;L</p>
-            <p className={`font-mono font-semibold ${plColor}`}>
-              {position.unrealizedPL >= 0 ? '+' : ''}{position.unrealizedPL.toFixed(2)}
-            </p>
-          </div>
+          {/* Stop/target projections from the entry order's sizing record */}
+          {(position.stopLoss !== null || position.takeProfit !== null) && (
+            <div className="grid grid-cols-2 gap-2 text-sm mt-2 pt-2 border-t border-gray-800">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">
+                  Stop{position.stopLoss !== null && (
+                    <span className="text-gray-600 normal-case"> {position.stopLoss.toFixed(position.stopLoss > 10 ? 3 : 5)}</span>
+                  )}
+                </p>
+                <p className="font-mono font-semibold text-red-400">
+                  {position.projectedLossAud !== null ? `−$${position.projectedLossAud.toFixed(2)}` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">
+                  Target{position.takeProfit !== null && (
+                    <span className="text-gray-600 normal-case"> {position.takeProfit.toFixed(position.takeProfit > 10 ? 3 : 5)}</span>
+                  )}
+                </p>
+                <p className="font-mono font-semibold text-emerald-400">
+                  {position.projectedProfitAud !== null ? `+$${position.projectedProfitAud.toFixed(2)}` : '—'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <p className="text-xs text-gray-600 italic mb-3">No open position</p>
@@ -103,17 +157,19 @@ export function InstrumentCard({ settings, position, onUpdated }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => adjustRisk(-RISK_STEP)}
-            disabled={busy || riskPercent <= RISK_MIN}
+            disabled={displayRisk <= RISK_MIN}
             className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm disabled:opacity-30 transition-colors"
           >
             −
           </button>
-          <span className="font-mono text-emerald-400 font-semibold w-10 text-center">
-            {riskPercent.toFixed(1)}%
+          <span className={`font-mono font-semibold w-10 text-center ${
+            pendingRisk !== null ? 'text-amber-400' : 'text-emerald-400'
+          }`}>
+            {displayRisk.toFixed(1)}%
           </span>
           <button
             onClick={() => adjustRisk(+RISK_STEP)}
-            disabled={busy || riskPercent >= RISK_MAX}
+            disabled={displayRisk >= RISK_MAX}
             className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm disabled:opacity-30 transition-colors"
           >
             +

@@ -39,4 +39,33 @@ public record TradeHistoryRecord
 
     /// <summary>UTC timestamp of the order attempt.</summary>
     public DateTimeOffset ExecutedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    // ── Sizing audit trail (migration 007) — all null for Close signals ──────
+
+    /// <summary>Risk percent applied at sizing time.</summary>
+    public decimal? RiskPercent { get; init; }
+
+    /// <summary>Where the risk percent came from: "signal-override", "db", "config-default".</summary>
+    public string? RiskSource { get; init; }
+
+    /// <summary>Account balance (AUD) at sizing time.</summary>
+    public decimal? AccountBalance { get; init; }
+
+    /// <summary>AUD at risk if the stop is hit: AccountBalance × RiskPercent/100.</summary>
+    public decimal? RiskAmount { get; init; }
+
+    /// <summary>ATR from the signal (0 when the signal supplied explicit SL/TP).</summary>
+    public decimal? Atr { get; init; }
+
+    /// <summary>Stop distance in quote-currency price units.</summary>
+    public decimal? StopDistance { get; init; }
+
+    /// <summary>Where the stop distance came from: "signal-sl" or "atr×N".</summary>
+    public string? StopSource { get; init; }
+
+    /// <summary>Quote-currency → AUD conversion rate used for sizing.</summary>
+    public decimal? QuoteToAud { get; init; }
+
+    /// <summary>Which limit reduced the size: null, "margin-cap", "max-position-units", "aborted".</summary>
+    public string? CapReason { get; init; }
 }
