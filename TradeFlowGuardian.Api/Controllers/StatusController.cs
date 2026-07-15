@@ -6,6 +6,7 @@ using TradeFlowGuardian.Api.Hubs;
 using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
+using TradeFlowGuardian.Core.Models;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
@@ -81,15 +82,19 @@ public class StatusController(
     }
 
     /// <summary>
-    /// Realized P&amp;L grouped by UTC day (range=daily, 30 days) or ISO week (range=weekly, 13 weeks).
-    /// Each bucket includes only fully-closed trades (entry fill paired with a Close fill).
-    /// Returns an empty array when there is no matching trade history — never an error.
+    /// Realized P&amp;L per UTC day for the current week (range=week, Monday→now) or the
+    /// current month (range=month, 1st→now). Buckets by the trade's close date, so each
+    /// bucket reflects P&amp;L actually realized that day. Only fully-closed trades count
+    /// (entry fill paired with a Close fill). Returns an empty array when there is no
+    /// matching trade history — never an error.
     /// </summary>
     [HttpGet("pnl")]
-    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "daily", CancellationToken ct = default)
+    public async Task<IActionResult> GetDailyPnl([FromQuery] string range = "week", CancellationToken ct = default)
     {
-        var weekly = "weekly".Equals(range, StringComparison.OrdinalIgnoreCase);
-        var data   = await tradeHistory.GetDailyPnlAsync(weekly, ct);
+        var pnlRange = "month".Equals(range, StringComparison.OrdinalIgnoreCase)
+            ? PnlRange.Month
+            : PnlRange.Week;
+        var data = await tradeHistory.GetDailyPnlAsync(pnlRange, ct);
         return Ok(data.Select(d => new
         {
             date       = d.Date,
@@ -177,6 +182,31 @@ public class StatusController(
             },
             fetchedAt = DateTimeOffset.UtcNow
         });
+    }
+
+    /// <summary>
+    /// Returns closed trade history pulled directly from OANDA (not the local DB).
+    /// RealizedPL is in account currency (AUD) as reported by OANDA.
+    /// Returns an empty array when OANDA is unreachable or the account has no closed trades
+    /// in the requested window — never throws.
+    /// </summary>
+    [HttpGet("history")]
+    public async Task<IActionResult> GetOandaHistory([FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        var from   = DateTimeOffset.UtcNow.AddDays(-days);
+        var to     = DateTimeOffset.UtcNow;
+        var trades = await broker.GetTransactionsAsync(from, to, ct);
+        return Ok(trades.Select(t => new
+        {
+            id         = t.Id,
+            instrument = t.Instrument,
+            units      = t.Units,
+            entryPrice = t.Price,
+            closePrice = t.ClosePrice,
+            realizedPL = t.RealizedPL,
+            openedAt   = t.OpenedAt,
+            closedAt   = t.Timestamp,
+        }));
     }
 
     /// <summary>

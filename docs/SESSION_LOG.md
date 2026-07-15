@@ -343,3 +343,13 @@
   - Migration `005_broker_column.sql` — additive `broker` discriminator on oanda_accounts (default 'oanda'), not yet read by code
   - 6 new `OandaBrokerClientMappingTests` pin the exact outgoing OANDA wire requests (capturing HttpMessageHandler) — 67/67 passing
   - `docs/BROKER_ABSTRACTION.md` — port surface, canonical EUR_USD instrument format, new-adapter checklist, deferred follow-ups
+
+### 2026-06-23
+- **P&L dashboard — current week / month view** (`claude/pnl-weekly-monthly-display-xjnin8`) — reframed the P&L tab from trailing daily(30d)/weekly(13w) bars to "how is *this* week/month going"
+  - Toggle is now **Week** (current Mon–Sun) / **Month** (current calendar month); everything (chart, headline total, win rate, per-pair breakdown, trade list) is scoped to the selected period
+  - `GET /api/status/pnl?range=week|month` — `GetDailyPnlAsync(PnlRange)` replaces the old `bool weekly`; buckets by the trade's **close** date (P&L realized that day) instead of entry date, and bounds the window by `close >= @Start` (Monday/1st, UTC)
+  - `DATE_TRUNC('day', c.executed_at AT TIME ZONE 'UTC')` — day grouping pinned to UTC so it lines up with the dashboard's UTC day frame regardless of DB session timezone
+  - `@Start` computed in C# (`PeriodStartUtc`) to exactly match the window the frontend renders, so the headline total reconciles with the sum of the bars
+  - New `PnlRange` enum in Core; `DailyPnlRecord.Date` doc updated (now the close day)
+  - Frontend: `PnlChart` rewritten as a diverging bar chart (zero baseline, gains up / losses down, today highlighted, no-trade days flat, future days empty); `PnlTab` zero-fills the full period frame and shows a headline summary (big total + trades/win%/best day)
+  - Dashboard `npm run build` clean (tsc + vite); no test mocks referenced the old repo signature

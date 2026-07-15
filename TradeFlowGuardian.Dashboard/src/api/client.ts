@@ -71,9 +71,22 @@ export interface TradeRecord {
 }
 
 export interface DailyPnlRecord {
-  date: string        // "YYYY-MM-DD" (daily = that day, weekly = Monday of the week)
+  date: string        // "YYYY-MM-DD" — the UTC day the trade was closed (P&L realized)
   pnl: number
   tradeCount: number
+}
+
+export type PnlRange = 'week' | 'month'
+
+export interface OandaTradeRecord {
+  id: string
+  instrument: string | null
+  units: number        // positive = long, negative = short (OANDA initialUnits)
+  entryPrice: number
+  closePrice: number   // averageClosePrice from OANDA (0 if unavailable)
+  realizedPL: number   // in account currency (AUD), net of commission & financing
+  openedAt: string     // ISO timestamp — when the position was opened
+  closedAt: string     // ISO timestamp — when the position was closed
 }
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -150,8 +163,11 @@ export const api = {
 
   getTrades: () => request<TradeRecord[]>('/status/trades'),
 
-  getPnl: (range: 'daily' | 'weekly') =>
+  getPnl: (range: PnlRange) =>
     request<DailyPnlRecord[]>(`/status/pnl?range=${range}`),
+
+  getOandaTrades: (days = 30) =>
+    request<OandaTradeRecord[]>(`/status/history?days=${days}`),
 
   closePosition: (instrument: string) =>
     request<void>(`/status/close/${instrument}`, { method: 'POST' }),
