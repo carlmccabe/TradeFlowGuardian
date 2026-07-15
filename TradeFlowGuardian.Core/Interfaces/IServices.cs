@@ -80,6 +80,8 @@ public interface ITradeHistoryRepository
 {
     Task InsertAsync(TradeHistoryRecord record, CancellationToken ct = default);
     Task<(bool Reachable, long RowCount, string? Error)> GetStatusAsync(CancellationToken ct = default);
+    /// <summary>Highest applied migration version from schema_versions, or null when unreachable.</summary>
+    Task<int?> GetSchemaVersionAsync(CancellationToken ct = default);
     /// <summary>
     /// Returns entry+close trade pairs whose entry executed inside [from, to).
     /// Null <paramref name="from"/> means no lower bound (all time); null <paramref name="to"/> means up to now.

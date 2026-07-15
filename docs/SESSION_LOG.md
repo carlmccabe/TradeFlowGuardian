@@ -13,6 +13,16 @@
 
 ---
 
+### 2026-07-15 (session 3) — Deploy verification: version, readiness, dry-run signals
+- **Why**: a deploy once shipped with risk % silently falling back to config default instead of the DB; with real money, every deploy needs positive proof of what's running
+- **`GET /api/status/version`** — api git SHA (`RAILWAY_GIT_COMMIT_SHA`/`GIT_SHA`), start time, active account label + environment (practice/LIVE)
+- **`GET /api/status/readiness`** — exercises every pipeline dependency and reports each: Postgres reachable + applied vs expected migration (enumerated from the build's embedded SQL), Redis ping, broker balance + account, per-instrument risk rows (the exact rows PositionSizer reads — missing rows are called out as "will fall back to config default"), Worker heartbeat + its SHA (mismatch with api SHA flagged)
+- **Worker heartbeat** — `WorkerHeartbeatService` writes `tradeflow:worker:heartbeat` (sha, startedAt, beatAt) every 15s, 60s TTL; a dead worker surfaces within a minute
+- **Dry-run signals** — `"dryRun": true` on the webhook payload runs the FULL pipeline (queue → worker → filters → DB risk lookup → live balance → sizing → SL/TP validation) and stops before order placement; no history write, no idempotency registration (repeatable), no drawdown marking; verdict stored at `tradeflow:dryrun:{key}` (15 min) with stage, wouldTrade, outcome, and the complete sizing breakdown incl. riskSource; fetched via `GET /api/status/dryrun/{key}`
+- **`scripts/verify-deploy.sh`** — one command post-deploy: version → readiness (hard-fails on any unhealthy dependency, incl. schema behind) → live-priced dry-run; explicitly fails if riskSource ≠ "db" (the original incident)
+- **Dashboard System panel** (Guard tab) — PRACTICE/LIVE badge, api+worker SHAs with heartbeat age and mismatch warning, schema applied/expected, per-instrument risk-from-db line, and a "Test pipeline" button that fires a dry run (uses the stored admin secret) and renders the verdict incl. risk source
+- Smoke-tested locally end-to-end: Api+Worker against real Redis — version/readiness endpoints correct, dry-run round trip (POST → stream → worker → Redis verdict → GET) confirmed, no order path touched; 69/69 tests pass
+
 ### 2026-07-15 (session 2) — Sizing transparency + trade history controls
 - **Sizing audit trail** (`claude/risk-size-adjustment-perf-kj46lk`) — every trade now records exactly how its size was reached
   - `SizingBreakdown` (Core/Models) — risk %, risk source, account balance, risk amount, ATR, stop distance, stop source, quote→AUD rate, raw units, margin cap, cap reason

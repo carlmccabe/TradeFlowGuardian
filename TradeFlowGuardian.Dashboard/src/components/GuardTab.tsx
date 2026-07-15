@@ -3,6 +3,7 @@ import { api, type RiskSettingsResponse, type PositionResponse } from '../api/cl
 import { usePolling } from '../hooks/usePolling'
 import { useSignalR, type TradingEvent } from '../hooks/useSignalR'
 import { InstrumentCard } from './InstrumentCard'
+import { SystemBar } from './SystemBar'
 
 export function GuardTab() {
   const fetchStatus = useCallback(() => api.getStatus(), [])
@@ -126,6 +127,9 @@ export function GuardTab() {
           ? 'Resume All Instruments'
           : 'Pause All Instruments'}
       </button>
+
+      {/* Deploy visibility + pipeline dry-run test */}
+      <SystemBar />
     </div>
   )
 }

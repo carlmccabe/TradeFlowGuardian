@@ -116,6 +116,48 @@ export interface OandaTradeRecord {
   closedAt: string     // ISO timestamp — when the position was closed
 }
 
+// ── System / deploy verification ──────────────────────────────────────────────
+
+export interface VersionResponse {
+  service: string
+  sha: string
+  startedAt: string
+  uptimeSeconds: number
+  accountEnvironment: string | null
+  accountLabel: string | null
+  isLive: boolean
+}
+
+export interface ReadinessResponse {
+  ok: boolean
+  api: { sha: string; startedAt: string }
+  worker: { sha?: string; startedAt?: string; beatAgeSeconds?: number; healthy: boolean; error?: string }
+  postgres: { reachable: boolean; error: string | null; appliedMigration: number | null; expectedMigration: number | null; schemaCurrent: boolean }
+  redis: { reachable: boolean; error: string | null }
+  broker: { reachable: boolean; error: string | null; balanceAud: number; accountEnvironment: string | null; accountLabel: string | null; isLive: boolean }
+  riskSettings: { ok: boolean; note: string | null; instruments: { instrument: string; riskPercent: number; isActive: boolean; source: string }[] }
+}
+
+export interface DryRunResult {
+  dryRun: boolean
+  instrument: string
+  direction: string
+  stage: string
+  wouldTrade: boolean
+  outcome: string
+  workerSha: string
+  completedAt: string
+  detail?: {
+    units?: number
+    stopLoss?: number
+    takeProfit?: number
+    projectedLossAud?: number
+    projectedProfitAud?: number | null
+    balance?: number
+    sizing?: { riskPercent: number; riskSource: string; riskAmount: number }
+  } | null
+}
+
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 export interface AccountResponse {
@@ -226,6 +268,26 @@ export const api = {
   pauseAll: () => request<void>('/risk/pause-all', { method: 'POST' }),
 
   resumeAll: () => request<void>('/risk/resume-all', { method: 'POST' }),
+
+  getVersion: () => request<VersionResponse>('/status/version'),
+
+  getReadiness: () => request<ReadinessResponse>('/status/readiness'),
+
+  getMidPrice: (instrument: string) =>
+    request<{ instrument: string; mid: number }>(`/price/mid/${instrument}`),
+
+  // Sends a dry-run signal through the real pipeline (queue → worker → filters →
+  // sizing). The worker never places an order for dryRun signals.
+  sendDryRunSignal: (secret: string, instrument: string, price: number, atr: number, key: string) =>
+    request<void>(`/signal?secret=${encodeURIComponent(secret)}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        instrument, direction: 'Long', price, atr,
+        riskPercent: 0, idempotencyKey: key, dryRun: true,
+      }),
+    }),
+
+  getDryRunResult: (key: string) => request<DryRunResult>(`/status/dryrun/${key}`),
 
   getActiveAccount: () => request<ActiveAccountResponse>('/accounts/active'),
 

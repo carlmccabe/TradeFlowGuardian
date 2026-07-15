@@ -7,6 +7,9 @@ using TradeFlowGuardian.Core.Configuration;
 using TradeFlowGuardian.Core.Brokers;
 using TradeFlowGuardian.Core.Interfaces;
 using TradeFlowGuardian.Core.Models;
+using TradeFlowGuardian.Infrastructure.Data;
+using StackExchange.Redis;
+using System.Reflection;
 
 namespace TradeFlowGuardian.Api.Controllers;
 
@@ -18,10 +21,156 @@ public class StatusController(
     IPauseState pauseState,
     IDailyDrawdownGuard drawdownGuard,
     ITradeHistoryRepository tradeHistory,
+    IRiskSettingsRepository riskSettingsRepo,
+    IActiveAccountProvider activeAccount,
+    IConnectionMultiplexer redis,
     IOptions<RiskConfig> risk,
     IHubContext<TradingHub> hub,
     ILogger<StatusController> logger) : ControllerBase
 {
+    private static readonly DateTimeOffset StartedAt = DateTimeOffset.UtcNow;
+
+    private static string GitSha =>
+        Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
+        ?? Environment.GetEnvironmentVariable("GIT_SHA")
+        ?? "unknown";
+
+    /// <summary>
+    /// Identifies the running Api build: git SHA, start time, and the active broker
+    /// account's environment. First stop after a deploy — does the SHA match what you merged?
+    /// </summary>
+    [HttpGet("version")]
+    public async Task<IActionResult> GetVersion(CancellationToken ct)
+    {
+        string? accountEnv = null, accountLabel = null;
+        try
+        {
+            var acct = await activeAccount.GetActiveAsync(ct);
+            accountEnv   = acct.Environment;
+            accountLabel = acct.Label;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Version endpoint could not resolve active account");
+        }
+
+        return Ok(new
+        {
+            service      = "api",
+            sha          = GitSha,
+            startedAt    = StartedAt,
+            uptimeSeconds = (long)(DateTimeOffset.UtcNow - StartedAt).TotalSeconds,
+            accountEnvironment = accountEnv,
+            accountLabel,
+            isLive       = accountEnv == "fxtrade",
+            fetchedAt    = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Deploy readiness: exercises every dependency the trade pipeline needs and reports
+    /// each check individually — Postgres + schema version vs the migrations shipped in
+    /// this build, Redis, broker balance, per-instrument risk settings (the rows the sizer
+    /// reads; a missing row silently falls back to the config default), and the Worker
+    /// heartbeat with the SHA it is running. ok=true only when everything passes.
+    /// </summary>
+    [HttpGet("readiness")]
+    public async Task<IActionResult> GetReadiness(CancellationToken ct)
+    {
+        // Postgres + schema level
+        var (dbReachable, _, dbError) = await tradeHistory.GetStatusAsync(ct);
+        var appliedVersion  = await tradeHistory.GetSchemaVersionAsync(ct);
+        int? expectedVersion = null;
+        try
+        {
+            expectedVersion = SqlMigrationRunner.LoadEmbedded(Assembly.GetExecutingAssembly())
+                .Select(m => m.Version).DefaultIfEmpty(0).Max();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not enumerate embedded migrations");
+        }
+        var schemaCurrent = appliedVersion is not null && appliedVersion == expectedVersion;
+
+        // Redis
+        bool redisOk = false; string? redisError = null;
+        try { await redis.GetDatabase().PingAsync(); redisOk = true; }
+        catch (Exception ex) { redisError = ex.Message; }
+
+        // Broker + account
+        string? accountEnv = null, accountLabel = null; decimal balance = 0;
+        string? brokerError = null;
+        try
+        {
+            var acct = await activeAccount.GetActiveAsync(ct);
+            accountEnv   = acct.Environment;
+            accountLabel = acct.Label;
+            balance      = await broker.GetAccountBalanceAsync(ct);
+        }
+        catch (Exception ex) { brokerError = ex.Message; }
+        var brokerOk = brokerError is null && balance > 0;
+
+        // Risk settings — the exact rows PositionSizer reads. No row for an instrument
+        // means the sizer silently falls back to the config default risk %.
+        var riskRows = await riskSettingsRepo.GetAllAsync(ct);
+        var riskOk = riskRows.Count > 0;
+
+        // Worker heartbeat
+        object? worker = null; var workerOk = false;
+        try
+        {
+            var raw = await redis.GetDatabase().StringGetAsync("tradeflow:worker:heartbeat");
+            if (raw.HasValue)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse((string)raw!);
+                var beatAt = doc.RootElement.GetProperty("beatAt").GetDateTimeOffset();
+                var age    = (DateTimeOffset.UtcNow - beatAt).TotalSeconds;
+                workerOk   = age < 60;
+                worker = new
+                {
+                    sha = doc.RootElement.GetProperty("sha").GetString(),
+                    startedAt = doc.RootElement.GetProperty("startedAt").GetDateTimeOffset(),
+                    beatAgeSeconds = Math.Round(age, 1),
+                    healthy = workerOk
+                };
+            }
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Could not read worker heartbeat"); }
+
+        var ok = dbReachable && schemaCurrent && redisOk && brokerOk && riskOk && workerOk;
+
+        return Ok(new
+        {
+            ok,
+            api = new { sha = GitSha, startedAt = StartedAt },
+            worker = worker ?? (object)new { healthy = false, error = "no heartbeat in Redis (worker down or old build without heartbeat)" },
+            postgres = new { reachable = dbReachable, error = dbError, appliedMigration = appliedVersion, expectedMigration = expectedVersion, schemaCurrent },
+            redis = new { reachable = redisOk, error = redisError },
+            broker = new { reachable = brokerOk, error = brokerError, balanceAud = balance, accountEnvironment = accountEnv, accountLabel, isLive = accountEnv == "fxtrade" },
+            riskSettings = new
+            {
+                ok = riskOk,
+                note = riskOk ? null : "no rows — PositionSizer will fall back to config default risk %",
+                instruments = riskRows.Select(r => new { r.Instrument, r.RiskPercent, r.IsActive, source = "db" })
+            },
+            fetchedAt = DateTimeOffset.UtcNow
+        });
+    }
+
+    /// <summary>
+    /// Fetches a dry-run signal's outcome by its idempotency key. The Worker stores results
+    /// for 15 minutes. 404 until the Worker has processed the signal — poll after POSTing
+    /// a signal with "dryRun": true.
+    /// </summary>
+    [HttpGet("dryrun/{key}")]
+    public async Task<IActionResult> GetDryRunResult(string key, CancellationToken ct)
+    {
+        var raw = await redis.GetDatabase().StringGetAsync($"tradeflow:dryrun:{key}");
+        if (!raw.HasValue)
+            return NotFound(new { error = "no result yet — worker still processing, or key unknown/expired (15 min TTL)", key });
+        return Content((string)raw!, "application/json");
+    }
+
     /// <summary>
     /// Combined status: live balance + all open positions with unrealised P&amp;L.
     /// Each position is enriched with the SL/TP and sizing breakdown recorded when

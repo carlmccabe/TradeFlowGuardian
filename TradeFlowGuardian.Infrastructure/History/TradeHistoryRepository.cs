@@ -76,6 +76,24 @@ public class TradeHistoryRepository(
         }
     }
 
+    public async Task<int?> GetSchemaVersionAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_connectionString))
+            return null;
+
+        try
+        {
+            await using var conn = new NpgsqlConnection(_connectionString);
+            await conn.OpenAsync(ct);
+            return await conn.ExecuteScalarAsync<int?>("SELECT MAX(version) FROM schema_versions");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to read schema version");
+            return null;
+        }
+    }
+
     private const string PairedTradesSql = """
         SELECT
             e.instrument                                        AS Instrument,

@@ -46,11 +46,23 @@ public class StatusControllerTests
             .ReturnsAsync((true, 0L, (string?)null));
 
         var riskOptions = Options.Create(new RiskConfig { MaxDailyDrawdownPercent = 3.0m });
+
+        var riskRepoMock = new Mock<IRiskSettingsRepository>();
+        riskRepoMock.Setup(x => x.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<RiskSettings>());
+        var activeAccountMock = new Mock<IActiveAccountProvider>();
+        var redisDbMock = new Mock<StackExchange.Redis.IDatabase>();
+        var redisMock = new Mock<StackExchange.Redis.IConnectionMultiplexer>();
+        redisMock.Setup(r => r.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(redisDbMock.Object);
+
         _controller = new StatusController(
             _oandaMock.Object,
             _pauseStateMock.Object,
             _drawdownGuardMock.Object,
             _tradeHistoryMock.Object,
+            riskRepoMock.Object,
+            activeAccountMock.Object,
+            redisMock.Object,
             riskOptions,
             _hubMock.Object,
             _loggerMock.Object);
