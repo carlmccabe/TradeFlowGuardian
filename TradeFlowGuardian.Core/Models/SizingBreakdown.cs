@@ -42,9 +42,15 @@ public record SizingBreakdown
     /// <summary>Uncapped size: RiskAmount / LossPerUnit.</summary>
     public decimal RawUnits { get; init; }
 
-    /// <summary>Units allowed by the 28% margin-utilisation cap.</summary>
+    /// <summary>Units allowed by the per-instrument margin-utilisation cap (default 28%).</summary>
     public decimal MarginCapUnits { get; init; }
 
-    /// <summary>Which limit reduced the size: null (none), "margin-cap", "max-position-units", or "aborted".</summary>
+    /// <summary>Margin (AUD) already committed by open positions when this trade was sized.</summary>
+    public decimal ExistingMarginAud { get; init; }
+
+    /// <summary>Units that fit under the total margin ceiling after existing positions. Null when the check could not run (no price).</summary>
+    public decimal? AggregateCapUnits { get; init; }
+
+    /// <summary>Which limit reduced the size: null (none), "margin-cap", "aggregate-margin-cap", "max-position-units", or "aborted".</summary>
     public string? CapReason { get; init; }
 }

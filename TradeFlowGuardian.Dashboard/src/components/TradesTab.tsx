@@ -208,7 +208,10 @@ function SizingBreakdown({ trade: t }: { trade: TradeRecord }) {
       <Row label="Final size">
         <b className="text-gray-100">{Math.abs(t.units).toLocaleString()} units</b>
         {s.capReason
-          ? <span className="text-amber-400"> — reduced by {s.capReason === 'margin-cap' ? 'the 28% margin cap' : s.capReason}</span>
+          ? <span className="text-amber-400"> — reduced by {
+              s.capReason === 'margin-cap' ? 'the per-instrument margin cap'
+              : s.capReason === 'aggregate-margin-cap' ? 'the total margin ceiling (open positions)'
+              : s.capReason}</span>
           : <span className="text-gray-600"> — no cap applied, full risk size</span>}
       </Row>
     </div>
