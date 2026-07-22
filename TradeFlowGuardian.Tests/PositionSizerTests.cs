@@ -19,7 +19,9 @@ public class PositionSizerTests
         Mock<IBrokerClient> oandaMock,
         decimal defaultRiskPct = 1.0m,
         decimal atrStopMultiplier = 2.0m,
-        decimal maxPositionUnits = 1_000_000m)
+        decimal maxPositionUnits = 1_000_000m,
+        RiskSettings? dbSettings = null,
+        decimal totalMarginCeilingPct = 75.0m)
     {
         var risk = Options.Create(new RiskConfig
         {
@@ -27,11 +29,12 @@ public class PositionSizerTests
             MaxPositionUnits     = maxPositionUnits,
             AtrStopMultiplier    = atrStopMultiplier,
             AtrTargetMultiplier  = 4.0m,
-            MaxDailyDrawdownPercent = 3.0m
+            MaxDailyDrawdownPercent = 3.0m,
+            TotalMarginCeilingPercent = totalMarginCeilingPct
         });
         var riskRepo = new Mock<IRiskSettingsRepository>();
         riskRepo.Setup(r => r.GetByInstrumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((TradeFlowGuardian.Core.Models.RiskSettings?)null);
+            .ReturnsAsync(dbSettings);
         oandaMock.SetupGet(c => c.Descriptor).Returns(new BrokerDescriptor("oanda", 30m));
         return new PositionSizer(risk, oandaMock.Object, riskRepo.Object, NullLogger<PositionSizer>.Instance);
     }
@@ -41,6 +44,8 @@ public class PositionSizerTests
         var mock = new Mock<IBrokerClient>();
         mock.Setup(c => c.GetMidPriceAsync("AUD_JPY", It.IsAny<CancellationToken>()))
             .ReturnsAsync(audJpy);
+        mock.Setup(c => c.GetAllOpenPositionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         return mock;
     }
 
@@ -195,6 +200,160 @@ public class PositionSizerTests
         // Exact marginCap = 2,800 / (149.50 / 2,940) = 2,800 / 0.050850... ≈ 55,059
         const long expectedMarginCap = 55_059L;
         Assert.InRange(units, expectedMarginCap - 5, expectedMarginCap + 5);
+    }
+
+    // ── per-instrument margin cap (USD_JPY 50% override) ─────────────────────
+
+    private static RiskSettings UsdJpyDbSettings(decimal? marginCapPct) => new()
+    {
+        Instrument       = "USD_JPY",
+        RiskPercent      = 2.5m,
+        MarginCapPercent = marginCapPct,
+        IsActive         = true
+    };
+
+    /// <summary>
+    /// USD_JPY at its locked live risk (2.5% from the DB) with the 50% margin cap
+    /// override, across the ATR range. Spot 149.50, AUDJPY 98, SL = ATR × 2.6,
+    /// balance 10,000 AUD (binding behaviour is balance-invariant: risk amount and
+    /// margin ceiling both scale linearly with balance).
+    ///
+    ///   raw           = 250 / (ATR × 2.6 / 98)
+    ///   marginPerUnit = 149.50 × (1/30) × (1/98) ≈ 0.0508503 AUD
+    ///   50% cap       = 5,000 / 0.0508503 ≈ 98,328 units
+    ///
+    ///   ATR 0.06 → raw 157,051, margin need 79.9% → clipped to 98,328 (margin-cap)
+    ///   ATR 0.10 → raw  94,231, margin need 47.9% → full risk size
+    ///   ATR 0.13 → raw  72,485, margin need 36.9% → full risk size
+    ///   ATR 0.17 → raw  55,430, margin need 28.2% → full risk size
+    ///                            (would have been clipped by the old flat 28% cap)
+    /// </summary>
+    [Theory]
+    [InlineData("0.06", 98_328L, "margin-cap")]
+    [InlineData("0.10", 94_231L, null)]
+    [InlineData("0.13", 72_485L, null)]
+    [InlineData("0.17", 55_430L, null)]
+    public async Task UsdJpy_MarginCap50_SizesFullRisk_WhenMarginNeedAtMostHalf(
+        string atrStr, long expectedUnits, string? expectedCapReason)
+    {
+        var atr    = decimal.Parse(atrStr);
+        var oanda  = OandaWithAudJpy(98m);
+        var sizer  = BuildSizer(oanda, atrStopMultiplier: 2.6m, dbSettings: UsdJpyDbSettings(50m));
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 0m,        // ATR path — stop = ATR × 2.6
+            Atr            = atr,
+            RiskPercent    = 0m,        // no override — 2.5% comes from the DB row
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = $"test-usdjpy-cap50-{atrStr}"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, 10_000m);
+
+        Assert.Equal("db", b.RiskSource);
+        Assert.Equal(2.5m, b.RiskPercent);
+        Assert.Equal(250m, b.RiskAmount);                       // 10,000 × 2.5%
+        Assert.Equal(expectedUnits, b.Units);
+        Assert.Equal(expectedCapReason, b.CapReason);
+    }
+
+    [Fact]
+    public async Task UsdJpy_NoDbOverride_FallsBackToDefault28Cap()
+    {
+        // Same ATR 0.17 trade but with no margin_cap_percent in the DB row:
+        // the config default (28%) applies and clips 55,430 → 55,064.
+        // This pins the exact regression the 50% override exists to fix.
+        var oanda  = OandaWithAudJpy(98m);
+        var sizer  = BuildSizer(oanda, atrStopMultiplier: 2.6m, dbSettings: UsdJpyDbSettings(null));
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 0m,
+            Atr            = 0.17m,
+            RiskPercent    = 0m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-default28"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, 10_000m);
+
+        // 28% cap = 2,800 / 0.0508503 ≈ 55,064 < raw 55,430
+        Assert.Equal(55_064L, b.Units);
+        Assert.Equal("margin-cap", b.CapReason);
+    }
+
+    // ── aggregate margin safety net ───────────────────────────────────────────
+
+    [Fact]
+    public async Task AggregateMarginCap_ShrinksNewTradeToFitHeadroom()
+    {
+        // Open GBP_USD position: 60,000 units @ 1.27, AUDUSD 0.63 →
+        //   existing margin = 60,000 × 1.27 × (1/30) × (1/0.63) ≈ 4,031.75 AUD
+        // Ceiling 75% of 10,000 = 7,500 → headroom ≈ 3,468.25 AUD
+        // New USD_JPY trade at ATR 0.06: raw 157,051, instrument 50% cap 98,328,
+        // but aggregate headroom only fits 3,468.25 / 0.0508503 ≈ 68,205 units.
+        var oanda = OandaWithAudJpy(98m);
+        oanda.Setup(c => c.GetMidPriceAsync("AUD_USD", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0.63m);
+        oanda.Setup(c => c.GetAllOpenPositionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new OpenPositionSummary("GBP_USD", 60_000m, 0m, 1.27m)]);
+
+        var sizer  = BuildSizer(oanda, atrStopMultiplier: 2.6m, dbSettings: UsdJpyDbSettings(50m));
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 0m,
+            Atr            = 0.06m,
+            RiskPercent    = 0m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-aggcap"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, 10_000m);
+
+        Assert.Equal(68_205L, b.Units);
+        Assert.Equal("aggregate-margin-cap", b.CapReason);
+        Assert.Equal(4_031.75m, Math.Round(b.ExistingMarginAud, 2));
+        Assert.NotNull(b.AggregateCapUnits);
+        Assert.Equal(68_205L, (long)Math.Round(b.AggregateCapUnits!.Value));
+    }
+
+    [Fact]
+    public async Task AggregateMarginCap_ZeroHeadroom_SizesToZero()
+    {
+        // Existing positions already exceed the 75% ceiling:
+        //   120,000 × 1.27 × (1/30) × (1/0.63) ≈ 8,063.49 AUD > 7,500 ceiling
+        // → headroom clamps to 0, new trade sizes to 0 units (handler aborts on 0).
+        var oanda = OandaWithAudJpy(98m);
+        oanda.Setup(c => c.GetMidPriceAsync("AUD_USD", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0.63m);
+        oanda.Setup(c => c.GetAllOpenPositionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new OpenPositionSummary("GBP_USD", 120_000m, 0m, 1.27m)]);
+
+        var sizer  = BuildSizer(oanda, atrStopMultiplier: 2.6m, dbSettings: UsdJpyDbSettings(50m));
+        var signal = new TradeSignal
+        {
+            Instrument     = "USD_JPY",
+            Direction      = SignalDirection.Long,
+            Price          = 149.50m,
+            StopLoss       = 0m,
+            Atr            = 0.10m,
+            RiskPercent    = 0m,
+            Timestamp      = DateTime.UtcNow,
+            IdempotencyKey = "test-usdjpy-aggzero"
+        };
+
+        var b = await sizer.CalculateUnitsAsync(signal, 10_000m);
+
+        Assert.Equal(0L, b.Units);
+        Assert.Equal("aggregate-margin-cap", b.CapReason);
     }
 
     // ── zero / guard cases ────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ public class PositionSizer : IPositionSizer
         decimal accountBalance,
         CancellationToken ct = default)
     {
-        // DB lookup takes priority; signal override applies only when explicitly > 0
+        // Signal override (explicitly > 0) takes priority, then the DB row, then config default
         var dbSettings = await _riskRepo.GetByInstrumentAsync(signal.Instrument, ct);
 
         string riskSource;
@@ -88,17 +88,58 @@ public class PositionSizer : IPositionSizer
 
         var raw = riskAmount / lossPerUnit;
 
-        // Margin cap: no single trade may consume more than 28% of account margin.
+        // Per-instrument margin cap: no single trade may consume more than the
+        // instrument's margin_cap_percent (default Risk:DefaultMarginCapPercent, 28%).
         // Leverage comes from the broker descriptor (OANDA AU 30:1 → marginRate = 1/30).
-        // quoteToAud normalises JPY/USD/EUR → AUD.
-        const decimal marginUtilisationLimit = 0.28m;
-        var marginRate = 1.0m / _broker.Descriptor.Leverage;
+        // quoteToAud normalises JPY/USD/EUR → AUD; price × marginRate × quoteToAud is
+        // the AUD margin consumed per unit.
+        var marginCapPct = (dbSettings?.MarginCapPercent ?? _risk.DefaultMarginCapPercent) / 100m;
+        var marginRate   = 1.0m / _broker.Descriptor.Leverage;
+        var marginPerUnit = signal.Price * marginRate * quoteToAud;
         var marginCap = (signal.Price > 0)
-            ? (accountBalance * marginUtilisationLimit) / (signal.Price * marginRate * quoteToAud)
+            ? (accountBalance * marginCapPct) / marginPerUnit
             : _risk.MaxPositionUnits;
 
-        var capped = Math.Min(raw, Math.Min(_risk.MaxPositionUnits, marginCap));
-        var units  = (long)Math.Round(capped);
+        // Aggregate margin safety net: margin already committed by open positions plus
+        // this trade must stay under Risk:TotalMarginCeilingPercent of the balance.
+        // Sessions overlap across instruments, so per-instrument caps alone don't bound
+        // total exposure. The new trade shrinks to fit the remaining headroom.
+        decimal existingMarginAud = 0m;
+        decimal? aggregateCap = null;
+        if (signal.Price > 0)
+        {
+            var openPositions = await _broker.GetAllOpenPositionsAsync(ct) ?? [];
+            foreach (var pos in openPositions)
+            {
+                var posQuoteToAud = pos.Instrument == signal.Instrument
+                    ? quoteToAud
+                    : await GetQuoteToAudAsync(pos.Instrument, ct);
+                existingMarginAud += Math.Abs(pos.Units) * pos.AveragePrice * marginRate * posQuoteToAud;
+            }
+
+            var ceilingAud  = accountBalance * (_risk.TotalMarginCeilingPercent / 100m);
+            var headroomAud = Math.Max(0m, ceilingAud - existingMarginAud);
+            aggregateCap    = headroomAud / marginPerUnit;
+        }
+
+        var capped = raw;
+        string? capReason = null;
+        if (_risk.MaxPositionUnits < capped)
+        {
+            capped    = _risk.MaxPositionUnits;
+            capReason = "max-position-units";
+        }
+        if (marginCap < capped)
+        {
+            capped    = marginCap;
+            capReason = "margin-cap";
+        }
+        if (aggregateCap is { } agg && agg < capped)
+        {
+            capped    = agg;
+            capReason = "aggregate-margin-cap";
+        }
+        var units = (long)Math.Round(capped);
 
         string? capReason = null;
         if (capped < raw)
@@ -107,18 +148,21 @@ public class PositionSizer : IPositionSizer
         _logger.LogInformation(
             "Sizing {Instrument} {Direction} | riskSource={RiskSource} riskPct={RiskPct}% riskAmount={RiskAmount:F2} AUD | " +
             "stopSource={StopSource} stopDist={StopDist} quoteToAud={QuoteToAud:F4} lossPerUnit={LossPerUnit:F6} | " +
-            "raw={Raw:F0} marginCap={MarginCap:F0} units={Units} capReason={CapReason}",
+            "raw={Raw:F0} marginCap={MarginCap:F0} existingMargin={ExistingMargin:F2} AUD aggregateCap={AggregateCap:F0} " +
+            "units={Units} capReason={CapReason}",
             signal.Instrument, signal.Direction,
             riskSource, riskPct, riskAmount,
             stopSource, stopDistance, quoteToAud, lossPerUnit,
-            raw, marginCap, units, capReason ?? "none");
+            raw, marginCap, existingMarginAud, aggregateCap ?? -1m, units, capReason ?? "none");
 
         return breakdown with
         {
-            Units          = units,
-            RawUnits       = raw,
-            MarginCapUnits = marginCap,
-            CapReason      = capReason
+            Units             = units,
+            RawUnits          = raw,
+            MarginCapUnits    = marginCap,
+            ExistingMarginAud = existingMarginAud,
+            AggregateCapUnits = aggregateCap,
+            CapReason         = capReason
         };
     }
 

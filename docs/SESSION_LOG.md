@@ -13,6 +13,14 @@
 
 ---
 
+### 2026-07-22 — USDJPY margin runway: per-instrument cap + aggregate ceiling (`feature/usdjpy-margin-runway`)
+- **Why**: the flat 28% single-trade margin cap was clipping USD_JPY below its full 2.5% locked risk in low-ATR conditions (at ATR 0.17 / spot 149.50 the risk size needs ~28.2% margin — just over the cap)
+- **Per-instrument margin cap** — `risk_settings.margin_cap_percent` (migration `008_instrument_margin_cap.sql`, additive; NULL = config default `Risk:DefaultMarginCapPercent` 28%); USD_JPY seeded to 50% (pending review confirmation)
+- **Aggregate margin safety net** — PositionSizer now sums margin committed by all open positions (via `GetAllOpenPositionsAsync`) and shrinks the new trade to fit under `Risk:TotalMarginCeilingPercent` (default 75%) rather than rejecting; new `aggregate-margin-cap` cap reason in the sizing audit trail; rationale: USDJPY and GBPUSD sessions overlap, so raising one instrument's cap alone could stack concurrent full-risk margin
+- **SizingBreakdown** gains `ExistingMarginAud` + `AggregateCapUnits`; dashboard TradesTab label no longer hardcodes "28%"
+- Fixed stale comment in PositionSizer (risk precedence is signal-override → DB → config default, not "DB first")
+- Tests: 76 passing (7 new — ATR sweep 0.06/0.10/0.13/0.17 at the 50% cap, 28% fallback pin, aggregate headroom shrink, zero-headroom abort)
+
 ### 2026-07-15 (session 3) — Deploy verification: version, readiness, dry-run signals
 - **Why**: a deploy once shipped with risk % silently falling back to config default instead of the DB; with real money, every deploy needs positive proof of what's running
 - **`GET /api/status/version`** — api git SHA (`RAILWAY_GIT_COMMIT_SHA`/`GIT_SHA`), start time, active account label + environment (practice/LIVE)
