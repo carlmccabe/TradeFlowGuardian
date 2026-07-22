@@ -18,6 +18,7 @@ public class TradeFlowDbContext(DbContextOptions<TradeFlowDbContext> options) : 
             e.HasKey(r => r.Instrument);
             e.Property(r => r.Instrument).HasColumnName("instrument").HasMaxLength(20);
             e.Property(r => r.RiskPercent).HasColumnName("risk_percent").HasColumnType("numeric(5,4)");
+            e.Property(r => r.MarginCapPercent).HasColumnName("margin_cap_percent").HasColumnType("numeric(5,2)");
             e.Property(r => r.IsActive).HasColumnName("is_active");
             e.Property(r => r.UpdatedAt).HasColumnName("updated_at").HasColumnType("timestamp with time zone");
 

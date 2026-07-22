@@ -76,7 +76,7 @@ export interface TradeSizing {
   stopDistance: number
   stopSource: string       // 'signal-sl' | 'atr×N'
   quoteToAud: number
-  capReason: string | null // null | 'margin-cap' | 'max-position-units' | 'aborted'
+  capReason: string | null // null | 'margin-cap' | 'aggregate-margin-cap' | 'max-position-units' | 'aborted'
 }
 
 export interface TradeRecord {

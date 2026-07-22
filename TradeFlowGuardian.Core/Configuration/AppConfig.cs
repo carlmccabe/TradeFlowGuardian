@@ -26,6 +26,12 @@ public class RiskConfig
     public decimal AtrStopMultiplier { get; init; } = 2.0m;
     public decimal AtrTargetMultiplier { get; init; } = 4.0m;
     public decimal MaxDailyDrawdownPercent { get; init; } = 3.0m;
+
+    /// <summary>Single-trade margin cap (% of balance) when risk_settings has no per-instrument override.</summary>
+    public decimal DefaultMarginCapPercent { get; init; } = 28.0m;
+
+    /// <summary>Total margin ceiling (% of balance) across all open positions plus the new trade.</summary>
+    public decimal TotalMarginCeilingPercent { get; init; } = 75.0m;
 }
 
 public class FilterConfig
