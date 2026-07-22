@@ -141,10 +141,6 @@ public class PositionSizer : IPositionSizer
         }
         var units = (long)Math.Round(capped);
 
-        string? capReason = null;
-        if (capped < raw)
-            capReason = marginCap < _risk.MaxPositionUnits ? "margin-cap" : "max-position-units";
-
         _logger.LogInformation(
             "Sizing {Instrument} {Direction} | riskSource={RiskSource} riskPct={RiskPct}% riskAmount={RiskAmount:F2} AUD | " +
             "stopSource={StopSource} stopDist={StopDist} quoteToAud={QuoteToAud:F4} lossPerUnit={LossPerUnit:F6} | " +
